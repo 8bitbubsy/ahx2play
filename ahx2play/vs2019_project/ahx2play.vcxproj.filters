@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="replayer">
+      <UniqueIdentifier>{ae6dcf2f-1370-4490-8add-a2a2fe54908f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="replayer\audiodrivers">
+      <UniqueIdentifier>{b7934471-c816-41e1-a087-e833dea0d6ca}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="replayer\audiodrivers\winmm">
+      <UniqueIdentifier>{765d9bc3-93da-4fbe-8eec-597631925975}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\..\audiodrivers\winmm\winmm.c">
+      <Filter>replayer\audiodrivers\winmm</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\ahx2play.c" />
+    <ClCompile Include="..\src\posix.c" />
+    <ClCompile Include="..\..\replayer.c">
+      <Filter>replayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\loader.c">
+      <Filter>replayer</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\paula.c">
+      <Filter>replayer</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\..\audiodrivers\winmm\winmm.h">
+      <Filter>replayer\audiodrivers\winmm</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\replayer.h">
+      <Filter>replayer</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\posix.h" />
+    <ClInclude Include="..\..\paula.h">
+      <Filter>replayer</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
