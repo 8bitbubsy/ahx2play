@@ -177,8 +177,9 @@ static void setUpFilterWaveForms(void)
 				d3 = fp16Clip(d3 + ((d2 >> 8) * d5));
 			}
 			
-			/* 8bb: Truncate lower 8 bits for this to be
-			** bit-accurate to how AHX does it (it uses a LUT).
+			/* 8bb:
+			** Truncate lower 8 bits for this to be bit-accurate
+			** to how AHX does it (it uses a LUT).
 			*/
 			d2 &= ~0xFF;
 			d3 &= ~0xFF;
