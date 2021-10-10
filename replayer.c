@@ -164,7 +164,6 @@ static void SetAudio(int32_t chNum, plyVoiceTemp_t *ch)
 
 static void ProcessStep(plyVoiceTemp_t *ch)
 {
-	const uint8_t *bytes;
 	uint8_t note, instr, cmd, param;
 
 	ch->volumeSlideUp = 0; // means A cmd
@@ -179,7 +178,8 @@ static void ProcessStep(plyVoiceTemp_t *ch)
 	}
 	else
 	{
-		bytes = &song.TrackTable[((ch->Track << 6) + song.NoteNr) * 3];
+		const uint8_t *bytes = &song.TrackTable[((ch->Track << 6) + song.NoteNr) * 3];
+
 		note = (bytes[0] >> 2) & 0x3F;
 		instr = ((bytes[0] & 3) << 4) | (bytes[1] >> 4);
 		cmd = bytes[1] & 0xF;
@@ -953,13 +953,13 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	// Square Treatin' (Calculation-Stuff)
 	if (ch->Waveform == 3-1 || ch->PlantSquare)
 	{
-		uint8_t *src8;
+		const uint8_t *src8;
 
 		// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
 		if (ch->filterPos == 0 || ch->filterPos > 63)
-			src8 = (uint8_t *)waves->EmptyFilterSection;
+			src8 = (const uint8_t *)waves->EmptyFilterSection;
 		else
-			src8 = (uint8_t *)&waves->squares[((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
+			src8 = (const uint8_t *)&waves->squares[((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
 
 		uint8_t whichSquare = ch->squarePos << (5 - ch->Wavelength);
 		if ((int8_t)whichSquare > 0x20)
@@ -976,30 +976,14 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 
 		song.WaveformTab[2] = ch->SquareTempBuffer;
 
-		uint32_t *dst32 = (uint32_t *)ch->SquareTempBuffer;
-		int32_t delta = (1 << 5) >> ch->Wavelength;
-		int32_t cycles = 1 << ch->Wavelength;
+		const int32_t delta = (1 << 5) >> ch->Wavelength;
+		const int32_t cycles = (1 << ch->Wavelength) << 2; // 8bb: <<2 since we do bytes not dwords, unlike AHX
 
 		// And calc it, too!
 		for (int32_t i = 0; i < cycles; i++)
 		{
-			uint32_t samples;
-
-			// 8bb: pack four source samples into a dword (source is not dword-aligned)
-
-			samples = *src8;
+			ch->SquareTempBuffer[i] = *src8;
 			src8 += delta;
-
-			samples |= (*src8) << 8;
-			src8 += delta;
-
-			samples |= (*src8) << 16;
-			src8 += delta;
-
-			samples |= (*src8) << 24;
-			src8 += delta;
-
-			*dst32++ = samples;
 		}
 
 		ch->NewWaveform = true;
