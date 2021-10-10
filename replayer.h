@@ -166,7 +166,7 @@ typedef struct // 8bb: channel structure
 	bool NoteCutOn;
 
 	int8_t *audioPointer; // fixed, constant 1kb buffer!
-	int8_t *audioSource; // connected to NewWaveform only!!
+	const int8_t *audioSource; // connected to NewWaveform only!!
 	uint16_t audioPeriod; // okey, if PlantPer, then -> audio
 	uint16_t audioVolume;
 

@@ -125,9 +125,7 @@ static void CopyWaveformToPaulaBuffer(plyVoiceTemp_t *ch) // 8bb: I put this cod
 	if (ch->Waveform == 4-1) // 8bb: noise, copy in one go
 	{
 		const uint32_t *src32 = (const uint32_t *)ch->audioSource;
-
-		const int32_t length = 0x280 / 8;
-		for (int32_t i = 0; i < length; i++)
+		for (int32_t i = 0; i < 0x280/8; i++)
 		{
 			*dst32++ = *src32++;
 			*dst32++ = *src32++;
@@ -806,7 +804,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 			ch->perfWait--;
 			if (signedOverflow || (int8_t)ch->perfWait <= 0) // 8bb: signed comparison is needed here
 			{
-				uint8_t *bytes = ch->perfList;
+				const uint8_t *bytes = ch->perfList;
 
 				uint8_t cmd2 = (bytes[0] >> 5) & 7;
 				uint8_t cmd1 = (bytes[0] >> 2) & 7;
@@ -1001,7 +999,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	// Init the final audioPointer
 	if (ch->NewWaveform)
 	{
-		int8_t *audioSource = song.WaveformTab[ch->Waveform];
+		const int8_t *audioSource = song.WaveformTab[ch->Waveform];
 
 		// Waveform 3 (doesn't need filter add)..
 		if (ch->Waveform != 3-1)
