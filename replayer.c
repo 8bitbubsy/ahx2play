@@ -117,6 +117,36 @@ static void ahxQuietAudios(void)
 		paulaSetVolume(i, 0);
 }
 
+static void CopyWaveformToPaulaBuffer(plyVoiceTemp_t *ch) // 8bb: I put this code in an own function
+{
+	// 8bb: audioPointer and audioSource buffers are dword-aligned, 32-bit access is safe
+	uint32_t *dst32 = (uint32_t *)ch->audioPointer;
+
+	if (ch->Waveform == 4-1) // 8bb: noise, copy in one go
+	{
+		const uint32_t *src32 = (const uint32_t *)ch->audioSource;
+
+		const int32_t length = 0x280 / 8;
+		for (int32_t i = 0; i < length; i++)
+		{
+			*dst32++ = *src32++;
+			*dst32++ = *src32++;
+		}
+	}
+	else
+	{
+		const int32_t length = (1 << (5 - ch->Wavelength)) * 5;
+		const int32_t copyLength = 1 << ch->Wavelength;
+
+		for (int32_t i = 0; i < length; i++)
+		{
+			const uint32_t *src32 = (const uint32_t *)ch->audioSource;
+			for (int32_t j = 0; j < copyLength; j++)
+				*dst32++ = *src32++;
+		}
+	}
+}
+
 static void SetAudio(int32_t chNum, plyVoiceTemp_t *ch)
 {
 	// new PERIOD to plant ???
@@ -129,33 +159,7 @@ static void SetAudio(int32_t chNum, plyVoiceTemp_t *ch)
 	// new FILTER or new WAVEFORM ???
 	if (ch->NewWaveform)
 	{
-		// 8bb: Paula buffer and waveform buffer are dword-aligned, 32-bit access is safe.
-		uint32_t *dst32 = (uint32_t *)ch->audioPointer;
-
-		if (ch->Waveform == 4-1) // 8bb: noise, copy in one go
-		{
-			uint32_t *src32 = (uint32_t *)ch->audioSource;
-
-			const int32_t length = 0x280 / 8;
-			for (int32_t i = 0; i < length; i++)
-			{
-				*dst32++ = *src32++;
-				*dst32++ = *src32++;
-			}
-		}
-		else
-		{
-			const int32_t length = (1 << (5 - ch->Wavelength)) * 5;
-			for (int32_t i = 0; i < length; i++)
-			{
-				uint32_t *src32 = (uint32_t *)ch->audioSource;
-
-				const int32_t copyLength = 1 << ch->Wavelength;
-				for (int32_t j = 0; j < copyLength; j++)
-					*dst32++ = *src32++;
-			}
-		}
-
+		CopyWaveformToPaulaBuffer(ch);
 		ch->NewWaveform = false;
 	}
 
