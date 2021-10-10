@@ -416,6 +416,10 @@ void paulaStartAllDMAs(void)
 		// set current sample point
 		v->dSample = v->AUD_DAT[0] * v->AUD_VOL;
 
+		// progress AUD_DAT buffer
+		v->AUD_DAT[0] = v->AUD_DAT[1];
+		v->sampleCounter--;
+
 		v->dPhase = v->dLastPhase = 0.0;
 		v->dBlepOffset = 0.0;
 
