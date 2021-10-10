@@ -37,6 +37,10 @@ enum
 #define ROL32(d, x) (d = (d << (x)) | (d >> (32-(x))))
 #define ROR32(d, x) (d = (d >> (x)) | (d << (32-(x))))
 
+#ifdef _MSC_VER
+#pragma pack(push)
+#pragma pack(1)
+#endif
 typedef struct
 {
 	uint8_t Volume;
@@ -67,7 +71,14 @@ typedef struct
 	uint8_t perfLength;
 
 	uint8_t perfList[4*256]; // 8bb: room for max perfLength entries!
-} instrument_t;
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+instrument_t;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
 
 typedef struct // 8bb: channel structure
 {
