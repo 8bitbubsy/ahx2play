@@ -20,11 +20,13 @@
 #include <math.h> // ceil()
 #include "replayer.h" // SIDInterrupt(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
 
+#define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
+
 #define NORM_FACTOR 1.5 /* can clip from high-pass filter overshoot */
 #define STEREO_NORM_FACTOR 0.5 /* cumulative mid/side normalization factor (1/sqrt(2))*(1/sqrt(2)) */
 #define INITIAL_DITHER_SEED 0x12345000
 
-static int8_t emptySample[0xFFFF*2];
+static int8_t emptySample[MAX_SAMPLE_LENGTH*2];
 static int32_t randSeed = INITIAL_DITHER_SEED;
 static double *dMixBufferL, *dMixBufferR, *dMixBufferLUnaligned, *dMixBufferRUnaligned;
 static double dPrngStateL, dPrngStateR, dSideFactor, dPeriodToDeltaDiv, dMixNormalize;
@@ -342,6 +344,10 @@ void paulaSetLength(int32_t ch, uint16_t len)
 {
 	if (len == 0) // not what happens on a real Amiga, but this is fine for AHX
 		len = 1;
+
+	// since AHX has a fixed Paula buffer size, clamp it here
+	if (len > MAX_SAMPLE_LENGTH)
+		len = MAX_SAMPLE_LENGTH;
 		
 	paula[ch].AUD_LEN = len;
 }
@@ -389,6 +395,10 @@ void paulaStartAllDMAs(void)
 
 		if (v->AUD_LEN == 0) // not what happens on a real Amiga, but this is fine for AHX
 			v->AUD_LEN = 1;
+
+		// since AHX has a fixed Paula buffer size, clamp it here
+		if (v->AUD_LEN > MAX_SAMPLE_LENGTH)
+			v->AUD_LEN = MAX_SAMPLE_LENGTH;
 
 		/* This is not really accurate to what happens on Paula
 		** during DMA start, but it's good enough.
