@@ -864,11 +864,8 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	// Square Treatin' (Modulation-Stuff)
 	if (ch->Waveform == 3-1 && ch->squareOn)
 	{
-		// 8bb: same quirk as above, though I'm not sure if squareWait can ever be 128 here
-		bool signedOverflow = (ch->squareWait == 128); // -128
-
 		ch->squareWait--;
-		if (signedOverflow || (int8_t)ch->squareWait <= 0) // 8bb: signed comparison is needed here
+		if ((int8_t)ch->squareWait <= 0) // 8bb: signed comparison is needed here
 		{
 			if (ch->squareInit)
 			{
@@ -904,11 +901,8 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	// Filter Treatin' (Modulation-Stuff)
 	if (ch->filterOn)
 	{
-		// 8bb: same quirk as above, though I'm not sure if filterWait can ever be 128 here
-		bool signedOverflow = (ch->filterWait == 128); // -128
-
 		ch->filterWait--;
-		if (signedOverflow || (int8_t)ch->filterWait <= 0) // 8bb: signed comparison is needed here
+		if ((int8_t)ch->filterWait <= 0) // 8bb: signed comparison is needed here
 		{
 			if (ch->filterInit)
 			{
