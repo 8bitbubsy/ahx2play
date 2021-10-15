@@ -12,7 +12,7 @@
 #include "posix.h"
 
 // defaults when not overriden by argument switches
-#define DEFAULT_AUDIO_FREQ 44100
+#define DEFAULT_AUDIO_FREQ 48000
 #define DEFAULT_AUDIO_BUFSIZE 1024
 #define DEFAULT_MASTER_VOL 256
 #define DEFAULT_STEREO_SEPARATION 10
