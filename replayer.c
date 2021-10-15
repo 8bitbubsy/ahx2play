@@ -922,7 +922,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 			}
 
 			int32_t cycles = 1;
-			if (ch->filterSpeed < 4)
+			if (ch->filterSpeed < 4) // 8bb: < 4 is correct, not < 3 like in WinAHX!
 				cycles = 5 - ch->filterSpeed;
 
 			for (int32_t i = 0; i < cycles; i++)
