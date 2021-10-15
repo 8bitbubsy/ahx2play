@@ -949,13 +949,13 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	// Square Treatin' (Calculation-Stuff)
 	if (ch->Waveform == 3-1 || ch->PlantSquare)
 	{
-		const uint8_t *src8;
+		const int8_t *src8;
 
 		// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
 		if (ch->filterPos == 0 || ch->filterPos > 63)
-			src8 = (const uint8_t *)waves->EmptyFilterSection;
+			src8 = (const int8_t *)waves->EmptyFilterSection;
 		else
-			src8 = (const uint8_t *)&waves->squares[((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
+			src8 = (const int8_t *)&waves->squares[((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
 
 		uint8_t whichSquare = ch->squarePos << (5 - ch->Wavelength);
 		if ((int8_t)whichSquare > 0x20)
@@ -1000,7 +1000,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 		{
 			// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
 			if (ch->filterPos == 0 || ch->filterPos > 63)
-				audioSource = waves->EmptyFilterSection;
+				audioSource = (const int8_t *)waves->EmptyFilterSection;
 			else
 				audioSource += ((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH;
 		}
