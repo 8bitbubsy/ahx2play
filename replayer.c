@@ -953,7 +953,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 
 		// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
 		if (ch->filterPos == 0 || ch->filterPos > 63)
-			src8 = (const int8_t *)waves->EmptyFilterSection;
+			src8 = waves->EmptyFilterSection;
 		else
 			src8 = (const int8_t *)&waves->squares[((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
 
@@ -1000,7 +1000,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 		{
 			// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
 			if (ch->filterPos == 0 || ch->filterPos > 63)
-				audioSource = (const int8_t *)waves->EmptyFilterSection;
+				audioSource = waves->EmptyFilterSection;
 			else
 				audioSource += ((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH;
 		}
@@ -1017,7 +1017,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 			audioSource += seed & ((NOIZE_SIZE-0x280) - 1);
 
 			seed += 2239384;
-			ROR32(seed, 8);
+			ROR32(seed, 8); // 8bb: 32-bit right-bit-rotate by 8
 			seed += 782323;
 			seed ^= 0b1001011;
 			seed -= 6735;
