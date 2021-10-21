@@ -14,6 +14,7 @@
 #include <string.h>
 #include <math.h> // ceil()
 #include "replayer.h"
+#include "audiodrivers/driver.h"
 
 static const uint8_t waveOffsets[6] =
 {

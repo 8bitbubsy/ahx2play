@@ -19,6 +19,7 @@
 #include "paula.h" // AMIGA_VOICES
 #include <math.h> // ceil()
 #include "replayer.h" // SIDInterrupt(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
+#include "audiodrivers/driver.h"
 
 #define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
 
