@@ -14,7 +14,7 @@ void closeSingleThread(void);
 #include <windows.h> // Sleep()
 #include <conio.h> // _kbhit(), _getch()
 
-bool createSingleThread(void (*threadFunc)(void *arg));
+bool createSingleThread(DWORD (WINAPI *threadFunc)(LPVOID arg));
 
 #else
 

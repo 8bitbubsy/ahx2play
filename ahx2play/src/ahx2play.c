@@ -41,15 +41,20 @@ static int32_t renderToWav(void);
 
 // yuck!
 #ifdef _WIN32
-void wavRecordingThread(void *arg)
+static DWORD WINAPI wavRecordingThread(LPVOID arg)
 #else
-void *wavRecordingThread(void *arg)
+static void *wavRecordingThread(void *arg)
 #endif
 {
+	// 8bb: put this in a thread so that it can be cancelled at any time by pressing a key (it can get stuck in a loop)
 	ahxRecordWAV(filename, WAVRenderFilename, 0, WAVSongLoopTimes, audioFrequency, masterVolume, stereoSeparation);
-#ifndef _WIN32
+
+#ifdef _WIN32
+	return 0;
+#else
 	return NULL;
 #endif
+
 	(void)arg;
 }
 

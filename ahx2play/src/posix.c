@@ -43,14 +43,14 @@ void showTextCursor(void)
 
 static HANDLE hThread;
 
-bool createSingleThread(void (*threadFunc)(void *arg))
+bool createSingleThread(DWORD (WINAPI *threadFunc)(LPVOID arg))
 {
 	DWORD dwThreadId;
 
 	if (hThread != NULL)
 		return false;
 
-	hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)threadFunc, NULL, 0, &dwThreadId);
+	hThread = CreateThread(NULL, 0, threadFunc, NULL, 0, &dwThreadId);
 	if (hThread == NULL)
 		return false;
 
