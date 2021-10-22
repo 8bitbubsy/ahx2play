@@ -206,23 +206,21 @@ static void setUpFilterWaveForms(void)
 
 void ahxFreeWaves(void)
 {
-	if (wavesOrig != NULL)
+	if (waves != NULL)
 	{
-		free(wavesOrig);
-		wavesOrig = NULL;
+		free(waves);
+		waves = NULL;
 	}
-	waves = NULL;
 }
 
 bool ahxInitWaves(void) // 8bb: this generates bit-accurate AHX 2.3d-sp3 waveforms
 {
 	ahxFreeWaves();
 
-	wavesOrig = (void *)MALLOC_PAD(sizeof (waveforms_t), 4);
-	if (wavesOrig == NULL)
+	// 8bb: "waves" needs dword-alignment, and that's guaranteed from malloc()
+	waves = (waveforms_t *)malloc(sizeof (waveforms_t));
+	if (waves == NULL)
 		return false;
-
-	waves = (waveforms_t *)ALIGN_PTR(wavesOrig, 4); // 8bb: align to dword
 
 	// 8bb: generate waveforms
 

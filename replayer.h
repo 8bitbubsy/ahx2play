@@ -24,9 +24,6 @@ enum
 #define CLAMP16(i) if ((int16_t)(i) != i) i = 0x7FFF ^ (i >> 31)
 #define CLAMP(x, low, high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
 
-#define ALIGN_PTR(p, x) (((uintptr_t)(p) + ((x)-1)) & ~((x)-1))
-#define MALLOC_PAD(size, pad) (malloc((size) + (pad)))
-
 #define SWAP16(x) \
 ( \
 	(((uint16_t)((x) & 0x00FF)) << 8) | \
@@ -246,8 +243,7 @@ waveforms_t;
 
 extern volatile bool isRecordingToWAV;
 extern song_t song;
-extern waveforms_t *waves; // 8bb: dword-aligned pointer
-extern void *wavesOrig; // 8bb: actual malloc address for waves
+extern waveforms_t *waves; // 8bb: dword-aligned from malloc()
 
 // loader.c
 bool ahxLoadFromRAM(const uint8_t *data);

@@ -67,8 +67,7 @@ static const int16_t vibTable[64] =
 // 8bb: globalized
 volatile bool isRecordingToWAV;
 song_t song;
-waveforms_t *waves; // 8bb: dword-aligned pointer
-void *wavesOrig; // 8bb: actual malloc address for waves
+waveforms_t *waves; // 8bb: dword-aligned from malloc()
 uint8_t ahxErrCode;
 // ------------
 

@@ -22,3 +22,5 @@ ahx2play/vs2019_project/Debug/ahx2play.vcxproj.FileListAbsolute.txt
 *.db-wal
 *.recipe
 ahx2play/vs2019_project/Release/ahx2play.iobj
+ahx2play/vs2019_project/debug.ahx
+ahx2play/vs2019_project/Debug/CodeAnalysisResultManifest.txt

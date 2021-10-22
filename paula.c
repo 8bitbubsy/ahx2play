@@ -21,15 +21,13 @@
 #include "replayer.h" // SIDInterrupt(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
 
 #define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
-
 #define NORM_FACTOR 1.5 /* can clip from high-pass filter overshoot */
 #define STEREO_NORM_FACTOR 0.5 /* cumulative mid/side normalization factor (1/sqrt(2))*(1/sqrt(2)) */
 #define INITIAL_DITHER_SEED 0x12345000
 
 static int8_t emptySample[MAX_SAMPLE_LENGTH*2];
 static int32_t randSeed = INITIAL_DITHER_SEED;
-static double *dMixBufferL, *dMixBufferR, *dMixBufferLUnaligned, *dMixBufferRUnaligned;
-static double dPrngStateL, dPrngStateR, dSideFactor, dPeriodToDeltaDiv, dMixNormalize;
+static double *dMixBufferL, *dMixBufferR, dPrngStateL, dPrngStateR, dSideFactor, dPeriodToDeltaDiv, dMixNormalize;
 
 // globalized
 audio_t audio;
@@ -695,20 +693,14 @@ bool paulaInit(int32_t audioFrequency)
 
 	const int32_t bufferBytes = maxSamplesToMix * sizeof (double);
 
-	dMixBufferLUnaligned = (double *)MALLOC_PAD(bufferBytes, 256);
-	dMixBufferRUnaligned = (double *)MALLOC_PAD(bufferBytes, 256);
+	dMixBufferL = (double *)calloc(1, bufferBytes);
+	dMixBufferR = (double *)calloc(1, bufferBytes);
 
-	if (dMixBufferLUnaligned == NULL || dMixBufferRUnaligned == NULL)
+	if (dMixBufferL == NULL || dMixBufferR == NULL)
 	{
 		paulaClose();
 		return false;
 	}
-
-	dMixBufferL = (double *)ALIGN_PTR(dMixBufferLUnaligned, 256);
-	dMixBufferR = (double *)ALIGN_PTR(dMixBufferRUnaligned, 256);
-
-	memset(dMixBufferL, 0, bufferBytes);
-	memset(dMixBufferR, 0, bufferBytes);
 
 	calculateFilterCoeffs();
 
@@ -722,15 +714,15 @@ bool paulaInit(int32_t audioFrequency)
 
 void paulaClose(void)
 {
-	if (dMixBufferLUnaligned != NULL)
+	if (dMixBufferL != NULL)
 	{
-		free(dMixBufferLUnaligned);
-		dMixBufferLUnaligned = NULL;
+		free(dMixBufferL);
+		dMixBufferL = NULL;
 	}
 
-	if (dMixBufferRUnaligned != NULL)
+	if (dMixBufferR != NULL)
 	{
-		free(dMixBufferRUnaligned);
-		dMixBufferRUnaligned = NULL;
+		free(dMixBufferR);
+		dMixBufferR = NULL;
 	}
 }
