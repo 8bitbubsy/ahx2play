@@ -334,7 +334,7 @@ void paulaSetVolume(int32_t ch, uint16_t vol)
 	if (realVol > 64)
 		realVol = 64;
 
-	// multiplying by this also scales the sample from -128..127 -> -1.0 .. ~0.99
+	// multiplying by this also scales the sample from -128 .. 127 -> -1.0 .. ~0.99
 	v->AUD_VOL = realVol * (1.0 / (128.0 * 64.0));
 }
 
@@ -412,7 +412,7 @@ void paulaStartAllDMAs(void)
 		v->sampleCounter = 2;
 
 		// set current sample point
-		v->dSample = v->AUD_DAT[0] * v->AUD_VOL;
+		v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128 .. 127 -> -1.0 .. ~0.99
 
 		// progress AUD_DAT buffer
 		v->AUD_DAT[0] = v->AUD_DAT[1];
@@ -457,9 +457,9 @@ static void mixChannels(int32_t numSamples)
 			dMixBuf[j] += dSmp;
 
 			v->dPhase += v->dDelta;
-			if (v->dPhase >= 1.0) // deltas can't be >= 1.0, so this is safe
+			if (v->dPhase >= 1.0) // next sample point
 			{
-				v->dPhase -= 1.0;
+				v->dPhase -= 1.0; // we use single-step deltas (< 1.0), so this is safe
 
 				v->dDelta = v->AUD_PER_delta; // Paula only updates period (delta) during sample fetching
 
@@ -484,7 +484,7 @@ static void mixChannels(int32_t numSamples)
 				** and we don't emulate volume PWM anyway, so we can
 				** pre-multiply by volume at this point.
 				*/
-				v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128..127 * 0.0 .. 1.0
+				v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128 .. 127 -> -1.0 .. ~0.99
 
 				// progress AUD_DAT buffer
 				v->AUD_DAT[0] = v->AUD_DAT[1];
@@ -522,7 +522,8 @@ void paulaMixSamples(int16_t *target, int32_t numSamples)
 	mixChannels(numSamples);
 
 	// apply filter, normalize, adjust stereo separation (if needed), dither and quantize
-	if (audio.stereoSeparation == 100) // Amiga hard-panning (don't adjust stereo separation)
+	
+	if (audio.stereoSeparation == 100) // Amiga panning (no stereo separation)
 	{
 		for (int32_t i = 0; i < numSamples; i++)
 		{
@@ -539,7 +540,7 @@ void paulaMixSamples(int16_t *target, int32_t numSamples)
 			double dR = dOut[1] * dMixNormalize;
 
 			// left channel - 1-bit triangular dithering (high-pass filtered)
-			dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+			dPrng = random32() * (0.5 / INT32_MAX); // -0.5 .. 0.5
 			dL = (dL + dPrng) - dPrngStateL;
 			dPrngStateL = dPrng;
 			smp32 = (int32_t)dL;
@@ -547,7 +548,7 @@ void paulaMixSamples(int16_t *target, int32_t numSamples)
 			*target++ = (int16_t)smp32;
 
 			// right channel - 1-bit triangular dithering (high-pass filtered)
-			dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+			dPrng = random32() * (0.5 / INT32_MAX); // -0.5 .. 0.5
 			dR = (dR + dPrng) - dPrngStateR;
 			dPrngStateR = dPrng;
 			smp32 = (int32_t)dR;
@@ -562,7 +563,6 @@ void paulaMixSamples(int16_t *target, int32_t numSamples)
 			dOut[0] = dMixBufferL[i];
 			dOut[1] = dMixBufferR[i];
 
-			// clear what we read
 			dMixBufferL[i] = 0.0;
 			dMixBufferR[i] = 0.0;
 
@@ -578,17 +578,18 @@ void paulaMixSamples(int16_t *target, int32_t numSamples)
 			double dSide = (dOldL - dOldR) * dSideFactor;
 			dL = dMid + dSide;
 			dR = dMid - dSide;
+			// -----------------------
 
-			// left channel - 1-bit triangular dithering (high-pass filtered)
-			dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+			// left channel
+			dPrng = random32() * (0.5 / INT32_MAX);
 			dL = (dL + dPrng) - dPrngStateL;
 			dPrngStateL = dPrng;
 			smp32 = (int32_t)dL;
 			CLAMP16(smp32);
 			*target++ = (int16_t)smp32;
 
-			// right channel - 1-bit triangular dithering (high-pass filtered)
-			dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+			// right channel
+			dPrng = random32() * (0.5 / INT32_MAX);
 			dR = (dR + dPrng) - dPrngStateR;
 			dPrngStateR = dPrng;
 			smp32 = (int32_t)dR;
