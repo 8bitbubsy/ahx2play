@@ -6,3 +6,4 @@ This is a direct port of the original tracker source codes.
 # Notes
 - This player is not optimized for speed, it's optimized for accuracy and sound quality
 - To compile ahx2play (the test program) on macOS/Linux, you need SDL2
+- When compiling, you need to pass the driver to use as a compiler pre-processor definition (f.ex. AUDIODRIVER_WINMM, check "paula.h")
