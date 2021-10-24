@@ -14,8 +14,23 @@
 #include "replayer.h"
 #include "paula.h"
 
-#define READ_BYTE(x, p) x = *p++
-#define READ_WORD(x, p) x = *(uint16_t *)p; p += 2; x = SWAP16(x)
+#define SWAP16(x) \
+( \
+	(((uint16_t)((x) & 0x00FF)) << 8) | \
+	(((uint16_t)((x) & 0xFF00)) >> 8)   \
+)
+
+#define SWAP32(x) \
+( \
+	(((uint32_t)((x) & 0x000000FF)) << 24) | \
+	(((uint32_t)((x) & 0x0000FF00)) <<  8) | \
+	(((uint32_t)((x) & 0x00FF0000)) >>  8) | \
+	(((uint32_t)((x) & 0xFF000000)) >> 24)   \
+)
+
+#define READ_BYTE(x, p)  x = *(uint8_t  *)p; p += sizeof (uint8_t);
+#define READ_WORD(x, p)  x = *(uint16_t *)p; p += sizeof (uint16_t); x = SWAP16(x)
+#define READ_DWORD(x, p) x = *(uint32_t *)p; p += sizeof (uint32_t); x = SWAP32(x)
 
 extern uint8_t ahxErrCode; // 8bb: replayer.c
 

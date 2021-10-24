@@ -24,12 +24,6 @@ enum
 #define CLAMP16(i) if ((int16_t)(i) != i) i = 0x7FFF ^ (i >> 31)
 #define CLAMP(x, low, high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
 
-#define SWAP16(x) \
-( \
-	(((uint16_t)((x) & 0x00FF)) << 8) | \
-	(((uint16_t)((x) & 0xFF00)) >> 8)   \
-)
-
 // bit-rotate macros
 #define ROL32(d, x) (d = (d << (x)) | (d >> (32-(x))))
 #define ROR32(d, x) (d = (d >> (x)) | (d << (32-(x))))
