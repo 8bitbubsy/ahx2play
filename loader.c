@@ -123,7 +123,7 @@ static inline int32_t fp16Clip(int32_t x)
 		fp16Int = 127;
 		return fp16Int << 16;
 	}
-	
+
 	if (fp16Int < -128)
 	{
 		fp16Int = -128;
