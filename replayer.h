@@ -106,7 +106,7 @@ typedef struct // 8bb: channel structure
 	bool NewWaveform; // flag!
 	bool PlantSquare; // flag! now baused by 9xx!
 	bool SquareReverse; // flag!
-	bool IgnoreSquare; // PADDY/KELLY FAMILY RULEZ! (8bb: ok...)
+	bool IgnoreSquare;
 	bool PlantPeriod; // flag! plant volume always?
 	bool FixedNote;
 
@@ -137,7 +137,7 @@ typedef struct // 8bb: channel structure
 	uint8_t squareWait; // Speed->Wait
 	uint8_t squareLowerLimit;
 	uint8_t squareUpperLimit;
-	uint8_t squarePos; // noch die wl dazuzaehlen!!
+	uint8_t squarePos;
 	int8_t squareSignum; // +1/-1 , to add/neg!
 	bool squareSlidingIn;
 
@@ -146,7 +146,7 @@ typedef struct // 8bb: channel structure
 	uint8_t filterWait; // Speed->Wait
 	uint8_t filterLowerLimit;
 	uint8_t filterUpperLimit;
-	uint8_t filterPos; // noch die wl dazuzaehlen!!
+	uint8_t filterPos;
 	int8_t filterSignum; // +2/-2 , to add/neg!
 	uint8_t filterSpeed;
 	bool filterSlidingIn;
@@ -155,7 +155,7 @@ typedef struct // 8bb: channel structure
 	uint8_t perfCurrent; // countin' down!!!!
 	uint8_t perfSpeed; // 'cause speed can b chgd!
 	uint8_t perfWait; // Speed->Wait
-	uint8_t *perfList; // length>0, weiter gehn!
+	uint8_t *perfList;
 
 	uint8_t NoteDelayWait;
 	bool NoteDelayOn;
@@ -172,8 +172,14 @@ typedef struct // 8bb: channel structure
 
 typedef struct // 8bb: song strucure
 {
-	bool songLoaded; // 8bb: added this
-	int32_t loopCounter, loopTimes; // 8bb: added this
+	// 8bb: added these
+	volatile bool songLoaded;
+	uint8_t Subsong;
+	uint16_t SongCIAPeriod;
+	int32_t loopCounter, loopTimes; // 8bb: for WAV rendering)
+	double dBPM;
+	instrument_t EmptyInstrument; // 8bb: initialized in ahxPlay()
+	// ----------------------------
 
 	volatile bool intPlaying;
 	char Name[255+1];
@@ -182,18 +188,14 @@ typedef struct // 8bb: song strucure
 	uint8_t highestTrack, numInstruments;
 	uint8_t Subsongs;
 
-	uint8_t Subsong; // 8bb: added this
-	uint16_t SongCIAPeriod; // 8bb: added this
-
 	plyVoiceTemp_t pvt[AMIGA_VOICES];
 
 	uint16_t TrackLength;
 	uint16_t StepWaitFrames; // 0: wait step!
 	bool GetNewPosition; // flag!
 	uint8_t Tempo; // some default?
-	double dBPM; // 8bb: added this
+	
 	bool PatternBreak;
-
 	uint16_t PosJump;
 	uint16_t PosJumpNote;
 	uint32_t WNRandom;
@@ -209,8 +211,6 @@ typedef struct // 8bb: song strucure
 	instrument_t *Instruments[63];
 
 	int8_t *WaveformTab[4]; // has to be inited!!!
-
-	instrument_t EmptyInstrument; // 8bb: added this ( initialized with def. values in ahxPlay() )
 } song_t;
 
 #ifdef _MSC_VER

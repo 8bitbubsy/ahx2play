@@ -19,9 +19,10 @@
 
 extern uint8_t ahxErrCode; // 8bb: replayer.c
 
-// 8bb: AHX-header speed value (0..3) -> Amiga PAL CIA period
+// 8bb: AHX-header tempo value (0..3) -> Amiga PAL CIA period
 static const uint16_t tabler[4] = { 14209, 7104, 4736, 3552 };
 
+// 8bb: added +1 to all values in this table (was meant for 68k DBRA loop)
 static const uint16_t lengthTable[6+6+32+1] =
 {
 	0x04,0x08,0x10,0x20,0x40,0x80,
@@ -93,6 +94,7 @@ static void squareGenerate(int8_t *dst8)
 static void whiteNoiseGenerate(int8_t *dst8, int32_t length)
 {
 	uint32_t seed = 0x41595321; // 8bb: "AYS!"
+
 	for (int32_t i = 0; i < length; i++)
 	{
 		if (!(seed & 256))
@@ -112,19 +114,20 @@ static void whiteNoiseGenerate(int8_t *dst8, int32_t length)
 	}
 }
 
-static int32_t fp16Clip(int32_t x)
+static inline int32_t fp16Clip(int32_t x)
 {
-	int16_t tmp = x >> 16;
-	if (tmp > 127)
-	{
-		tmp = 127;
-		return tmp << 16;
-	}
+	int16_t fp16Int = x >> 16;
 
-	if (tmp < -128)
+	if (fp16Int > 127)
 	{
-		tmp = -128;
-		return tmp << 16;
+		fp16Int = 127;
+		return fp16Int << 16;
+	}
+	
+	if (fp16Int < -128)
+	{
+		fp16Int = -128;
+		return fp16Int << 16;
 	}
 
 	return x;
@@ -138,7 +141,7 @@ static void setUpFilterWaveForms(void)
 	int32_t d5 = ((((8<<16)*125)/100)/100)>>8;
 	for (int32_t i = 0; i < 31; i++)
 	{
-		int8_t *src8 =  waves->triangle04; // 8bb: start of waveforms
+		int8_t *src8 =  waves->triangle04; // 8bb: beginning of waveforms
 		for (int32_t j = 0; j < 6+6+32+1; j++)
 		{
 			const int32_t waveLength = lengthTable[j];
@@ -178,13 +181,13 @@ static void setUpFilterWaveForms(void)
 			}
 			
 			/* 8bb:
-			** Truncate lower 8 bits for this to be bit-accurate
-			** to how AHX does it (it uses a LUT).
+			** Truncate lower 8 bits so that it's bit-accurate
+			** to how AHX does it (it uses a bit-reduced LUT).
 			*/
 			d2 &= ~0xFF;
 			d3 &= ~0xFF;
 
-			// 8bb: 4th pass (write)
+			// 8bb: 4th pass (also writes to output)
 			for (int32_t k = 0; k < waveLength; k++)
 			{
 				const int32_t d0 = (int16_t)src8[k] << 16;
@@ -329,6 +332,7 @@ static bool ahxInitModule(const uint8_t *p)
 
 	int32_t tracksToRead = numTracks;
 	uint8_t *dst8 = song.TrackTable;
+
 	if (trkNullEmpty)
 	{
 		dst8 += 3*64;
@@ -373,7 +377,7 @@ static bool ahxInitModule(const uint8_t *p)
 			break;
 	}
 
-	// 8bb: remove filter commands on rev-0 songs, if present
+	// 8bb: remove filter commands on rev-0 songs, if present (AHX does this)
 	if (song.Revision == 0)
 	{
 		uint8_t *ptr8;
@@ -418,14 +422,15 @@ static bool ahxInitModule(const uint8_t *p)
 		}
 	}
 
+	// 8bb: added this (BPM/tempo)
 	song.SongCIAPeriod = tabler[(flags >> 13) & 3];
 
-	// 8bb: set up waveform pointers (Note: song.WaveformTab[2] is setup in the replayer!)
+	// 8bb: set up waveform pointers (Note: song.WaveformTab[2] gets initialized in the replayer!)
 	song.WaveformTab[0] = waves->triangle04;
 	song.WaveformTab[1] = waves->sawtooth04;
 	song.WaveformTab[3] = waves->whiteNoiseBig;
 
-	// 8bb: set default values for EmptyInstrument (used for non-loaded instruments in replayer)
+	// 8bb: Added this. Set default values for EmptyInstrument (used for non-loaded instruments in replayer)
 	instrument_t *ins = &song.EmptyInstrument;
 	memset(ins, 0, sizeof (instrument_t));
 	ins->aFrames = 1;
@@ -439,6 +444,7 @@ static bool ahxInitModule(const uint8_t *p)
 	ins->filterLowerLimit = 1;
 	ins->filterUpperLimit = 0x1F;
 	ins->filterSpeedWavelength = 4<<3; // fs 3 wl 04 !!
+	// ----------------------------------------------------
 
 	song.songLoaded = true;
 	return true;

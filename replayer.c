@@ -231,7 +231,7 @@ static void ProcessStep(plyVoiceTemp_t *ch)
 		}
 	}
 
-	// 8bb: effect 8 is for external timing (demo sync etc), we don't need that 
+	// 8bb: effect 8 is for external timing/syncing (probably for games/demos), let's not include it
 
 	if (cmd == 0xD) // Effect  > D <  -  Patternbreak
 	{
@@ -254,9 +254,9 @@ static void ProcessStep(plyVoiceTemp_t *ch)
 	{
 		song.Tempo = param;
 
-		// 8bb: added this
+		// 8bb: added this for the WAV renderer
 		if (song.Tempo == 0)
-			isRecordingToWAV = false; // 8bb: stuck, stop WAV recording
+			isRecordingToWAV = false;
 	}
 
 	// Effect  > 5 <  -  Volume Slide + Tone Portamento
@@ -581,7 +581,7 @@ static void pListCommandParse(plyVoiceTemp_t *ch, uint8_t cmd, uint8_t param)
 		if (ins == NULL) // 8bb: safety bug-fix...
 			ins = &song.EmptyInstrument;
 
-		// 8bb: 4 bytes before perfList (apparently this is what AHX does...)
+		// 8bb: 4 bytes before perfList (this is apparently what AHX does...)
 		uint8_t *perfList = ins->perfList - 4;
 
 		/* 8bb: AHX quirk! There's no range check here.
@@ -793,7 +793,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 			/* 8bb: AHX QUIRK! Perf speed $80 results in no delay. This has to do with
 			** "sub.b #1,Dn | bgt.s .Delay". The BGT instruction will not branch if
 			** the register got overflown before the comparison (V flag set).
-			** WinAHX is not handling this correctly, porters beware!
+			** WinAHX/AHX.cpp is not handling this correctly, porters beware!
 			**
 			** "Enchanted Friday Nights" by JazzCat is a song that depends on this quirk
 			** for the lead instrument to sound right.
@@ -921,7 +921,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 			}
 
 			int32_t cycles = 1;
-			if (ch->filterSpeed < 4) // 8bb: < 4 is correct, not < 3 like in WinAHX!
+			if (ch->filterSpeed < 4) // 8bb: < 4 is correct, not < 3 like in WinAHX/AHX.cpp!
 				cycles = 5 - ch->filterSpeed;
 
 			for (int32_t i = 0; i < cycles; i++)
@@ -1081,7 +1081,7 @@ void SIDInterrupt(void)
 	if (!song.intPlaying)
 		return;
 
-	// set audioregisters... (8bb: yes, this is done first, NOT last like in WinAHX code!)
+	// set audioregisters... (8bb: yes, this is done here, NOT last like in WinAHX/AHX.cpp!)
 	ch = song.pvt;
 	for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
 		SetAudio(i, ch);
