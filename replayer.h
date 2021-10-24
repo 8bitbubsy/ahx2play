@@ -176,7 +176,7 @@ typedef struct // 8bb: song strucure
 	volatile bool songLoaded;
 	uint8_t Subsong;
 	uint16_t SongCIAPeriod;
-	int32_t loopCounter, loopTimes; // 8bb: for WAV rendering)
+	int32_t loopCounter, loopTimes; // 8bb: for WAV rendering
 	double dBPM;
 	instrument_t EmptyInstrument; // 8bb: initialized in ahxPlay()
 	// ----------------------------

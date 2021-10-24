@@ -3,7 +3,7 @@
 ** Doesn't include the 34kHz low-pass filter, nor the optional "LED" filter.
 **
 ** This code has been crafted for use with ahx2play.
-** Usage outside of ahx2play may be unstable or have unwanted results.
+** Usage outside of ahx2play may be unstable or give unwanted results.
 */
 
 // for finding memory leaks in debug mode with Visual Studio 
