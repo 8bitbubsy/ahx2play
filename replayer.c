@@ -1314,6 +1314,8 @@ bool ahxPlay(int32_t subSong)
 
 	song.dBPM = amigaCIAPeriod2Hz(song.SongCIAPeriod) * 2.5;
 
+	song.WNRandom = 0; // 8bb: Clear RNG seed (AHX doesn't do this)
+
 	unlockMixer();
 
 	return true;
