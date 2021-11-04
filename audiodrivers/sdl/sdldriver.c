@@ -10,7 +10,7 @@ static SDL_AudioDeviceID dev;
 
 static void SDLCALL audioCallback(void *userdata, Uint8 *stream, int len)
 {
-	paulaOutputSamples((int16_t *)stream, len / 4); // pmp_mix.c function
+	paulaOutputSamples((int16_t *)stream, len / 4); // ../../paula.h
 	(void)userdata;
 }
 

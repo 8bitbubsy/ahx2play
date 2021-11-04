@@ -32,7 +32,7 @@ static DWORD WINAPI mixThread(LPVOID lpParam)
 		if (!mixerLocked)
 		{
 			mixerBusy = true;
-			paulaOutputSamples((int16_t *)waveBlock->lpData, bufferSize); // ../../paula/paula.h
+			paulaOutputSamples((int16_t *)waveBlock->lpData, bufferSize); // ../../paula.h
 			mixerBusy = false;
 		}
 
