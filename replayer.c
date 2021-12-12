@@ -235,7 +235,7 @@ static void ProcessStep(plyVoiceTemp_t *ch)
 
 	if (cmd == 0xD) // Effect  > D <  -  Patternbreak
 	{
-		song.PosJump = (song.PosJump & 0xFF00) | (song.PosNr + 1); // jump to next position
+		song.PosJump = song.PosNr + 1; // jump to next position (8bb: yes, it clears PosJump hi-byte)
 
 		song.PosJumpNote = ((param >> 4) * 10) + (param & 0xF);
 		if (song.PosJumpNote >= song.TrackLength)
