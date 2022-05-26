@@ -15,7 +15,7 @@
 #define DEFAULT_AUDIO_FREQ 48000
 #define DEFAULT_AUDIO_BUFSIZE 1024
 #define DEFAULT_MASTER_VOL 256
-#define DEFAULT_STEREO_SEPARATION 10
+#define DEFAULT_STEREO_SEPARATION 20
 #define DEFAULT_WAVRENDER_LOOPS 0
 
 // set to true if you want ahx2play to always render to WAV
