@@ -24,6 +24,7 @@
 typedef struct audio_t
 {
 	volatile bool playing, pause;
+	bool oversamplingFlag;
 	int32_t outputFreq, masterVol, stereoSeparation;
 	int64_t tickSampleCounter64, samplesPerTick64;
 } audio_t;
@@ -42,18 +43,18 @@ typedef struct voice_t
 	// registers modified by Paula functions
 	const int8_t *AUD_LC; // location
 	uint16_t AUD_LEN; // length (in words)
-	double AUD_PER_delta; // delta
+	double AUD_PER_delta, AUD_PER_deltamul; // delta
 	double AUD_VOL; // volume
 
 	double dDelta, dPhase;
 
 	// for BLEP synthesis
-	double dLastDelta, dLastPhase, dBlepOffset, dDeltaMul;
+	double dLastDelta, dLastPhase, dLastDeltaMul, dBlepOffset, dDeltaMul;
 
 	// period cache
 	int32_t oldPeriod;
 	double dOldVoiceDelta, dOldVoiceDeltaMul;
-} paulaVoice_t;
+} paula_t;
 
 void paulaClearFilterState(void);
 void resetCachedMixerPeriod(void);
@@ -62,7 +63,7 @@ void resetAudioDithering(void);
 double amigaCIAPeriod2Hz(uint16_t period);
 bool amigaSetCIAPeriod(uint16_t period); // replayer ticker speed
 
-void paulaMixSamples(int16_t *target, int32_t numSamples);
+void paulaMixSamples(int16_t *target, uint32_t numSamples);
 bool paulaInit(int32_t audioFrequency);
 void paulaClose(void);
 
@@ -79,4 +80,4 @@ void paulaSetLength(int32_t ch, uint16_t len);
 void paulaSetData(int32_t ch, const int8_t *src);
 
 extern audio_t audio; // paula.c
-extern paulaVoice_t paula[AMIGA_VOICES]; // paula.c
+extern paula_t paula[AMIGA_VOICES]; // paula.c

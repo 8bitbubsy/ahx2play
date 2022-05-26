@@ -1,6 +1,6 @@
 /*
-** - Amiga 1200 Paula emulator w/ Amiga high-pass filter -
-** Doesn't include the 34kHz low-pass filter, nor the optional "LED" filter.
+** - Amiga 1200 Paula emulator w/ filters -
+** Doesn't include the optional "LED" filter. This was never used in AHX anyway.
 **
 ** This code has been crafted for use with ahx2play.
 ** Usage outside of ahx2play may be unstable or give unwanted results.
@@ -21,17 +21,18 @@
 #include "replayer.h" // SIDInterrupt(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
 
 #define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
-#define NORM_FACTOR 1.5 /* can clip from high-pass filter overshoot */
+#define NORM_FACTOR 1.5 /* this is a good value between loudness and clipping */
 #define STEREO_NORM_FACTOR 0.5 /* cumulative mid/side normalization factor (1/sqrt(2))*(1/sqrt(2)) */
 #define INITIAL_DITHER_SEED 0x12345000
 
+static bool useA1200LowPassFilter;
 static int8_t emptySample[MAX_SAMPLE_LENGTH*2];
 static int32_t randSeed = INITIAL_DITHER_SEED;
 static double *dMixBufferL, *dMixBufferR, dPrngStateL, dPrngStateR, dSideFactor, dPeriodToDeltaDiv, dMixNormalize;
 
 // globalized
 audio_t audio;
-paulaVoice_t paula[AMIGA_VOICES];
+paula_t paula[AMIGA_VOICES];
 
 /*
 ** Math replacement
@@ -86,19 +87,16 @@ static double my_cos(double x)
 ** https://www.musicdsp.org/en/latest/Filters/116-one-pole-lp-and-hp.html
 */
 
-// adding this prevents denormalized numbers, which is slow
-#define DENORMAL_OFFSET 1e-20
-
 typedef struct rcFilter_t
 {
 	double tmp[2], c1, c2;
 } rcFilter_t;
 
-static rcFilter_t filterHiA1200;
+static rcFilter_t filterLoA1200, filterHiA1200;
 
 static void calcRCFilterCoeffs(double sr, double hz, rcFilter_t *f)
 {
-	const double a = (hz < sr/2.0) ? my_cos((MY_TWO_PI * hz) / sr) : 1.0;
+	const double a = (hz < sr / 2.0) ? my_cos((MY_TWO_PI * hz) / sr) : 1.0;
 	const double b = 2.0 - a;
 	const double c = b - my_sqrt((b*b)-1.0);
 
@@ -111,15 +109,26 @@ static void clearRCFilterState(rcFilter_t *f)
 	f->tmp[0] = f->tmp[1] = 0.0;
 }
 
+static void RCLowPassFilterStereo(rcFilter_t *f, const double *in, double *out)
+{
+	// left channel
+	f->tmp[0] = (f->c1 * in[0]) + (f->c2 * f->tmp[0]);
+	out[0] = f->tmp[0];
+
+	// right channel
+	f->tmp[1] = (f->c1 * in[1]) + (f->c2 * f->tmp[1]);
+	out[1] = f->tmp[1];
+}
+
 static void RCHighPassFilterStereo(rcFilter_t *f, const double *in, double *out)
 {
 	// left channel
-	f->tmp[0] = (f->c1*in[0] + f->c2*f->tmp[0]) + DENORMAL_OFFSET;
-	out[0] = in[0]-f->tmp[0];
+	f->tmp[0] = (f->c1 * in[0]) + (f->c2 * f->tmp[0]);
+	out[0] = in[0] - f->tmp[0];
 
 	// right channel
-	f->tmp[1] = (f->c1*in[1] + f->c2*f->tmp[1]) + DENORMAL_OFFSET;
-	out[1] = in[1]-f->tmp[1];
+	f->tmp[1] = (f->c1 * in[1]) + (f->c2 * f->tmp[1]);
+	out[1] = in[1] - f->tmp[1];
 }
 
 // -----------------------------------------------
@@ -157,83 +166,75 @@ typedef struct blep_t
 
 static blep_t blep[AMIGA_VOICES];
 
-/* Why this table is not represented as readable floating-point numbers:
-** Accurate double representation in string format requires at least 14 digits and normalized
-** (scientific) notation, notwithstanding compiler issues with precision or rounding error.
-** Also, don't touch this table ever, just keep it exactly identical!
-*/
-static const uint64_t minblepdata[] =
+static const double dMinblepData[256 + 1] =
 {
-	0x3FF000320C7E95A6,0x3FF00049BE220FD5,0x3FF0001B92A41ACA,0x3FEFFF4425AA9724,
-	0x3FEFFDABDF6CF05C,0x3FEFFB5AF233EF1A,0x3FEFF837E2AE85F3,0x3FEFF4217B80E938,
-	0x3FEFEEECEB4E0444,0x3FEFE863A8358B5F,0x3FEFE04126292670,0x3FEFD63072A0D592,
-	0x3FEFC9C9CD36F56F,0x3FEFBA90594BD8C3,0x3FEFA7F008BA9F13,0x3FEF913BE2A0E0E2,
-	0x3FEF75ACCB01A327,0x3FEF5460F06A4E8F,0x3FEF2C5C0389BD3C,0x3FEEFC8859BF6BCB,
-	0x3FEEC3B916FD8D19,0x3FEE80AD74F0AD16,0x3FEE32153552E2C7,0x3FEDD69643CB9778,
-	0x3FED6CD380FFA864,0x3FECF374A4D2961A,0x3FEC692F19B34E54,0x3FEBCCCFA695DD5C,
-	0x3FEB1D44B168764A,0x3FEA59A8D8E4527F,0x3FE9814D9B10A9A3,0x3FE893C5B62135F2,
-	0x3FE790EEEBF9DABD,0x3FE678FACDEE27FF,0x3FE54C763699791A,0x3FE40C4F1B1EB7A3,
-	0x3FE2B9D863D4E0F3,0x3FE156CB86586B0B,0x3FDFCA8F5005B828,0x3FDCCF9C3F455DAC,
-	0x3FD9C2787F20D06E,0x3FD6A984CAD0F3E5,0x3FD38BB0C452732E,0x3FD0705EC7135366,
-	0x3FCABE86754E238F,0x3FC4C0801A6E9A04,0x3FBDECF490C5EA17,0x3FB2DFFACE9CE44B,
-	0x3FA0EFD4449F4620,0xBF72F4A65E22806D,0xBFA3F872D761F927,0xBFB1D89F0FD31F7C,
-	0xBFB8B1EA652EC270,0xBFBE79B82A37C92D,0xBFC1931B697E685E,0xBFC359383D4C8ADA,
-	0xBFC48F3BFF81B06B,0xBFC537BBA8D6B15C,0xBFC557CEF2168326,0xBFC4F6F781B3347A,
-	0xBFC41EF872F0E009,0xBFC2DB9F119D54D3,0xBFC13A7E196CB44F,0xBFBE953A67843504,
-	0xBFBA383D9C597E74,0xBFB57FBD67AD55D6,0xBFB08E18234E5CB3,0xBFA70B06D699FFD1,
-	0xBF9A1CFB65370184,0xBF7B2CEB901D2067,0x3F86D5DE2C267C78,0x3F9C1D9EF73F384D,
-	0x3FA579C530950503,0x3FABD1E5FFF9B1D0,0x3FB07DCDC3A4FB5B,0x3FB2724A856EEC1B,
-	0x3FB3C1F7199FC822,0x3FB46D0979F5043B,0x3FB47831387E0110,0x3FB3EC4A58A3D527,
-	0x3FB2D5F45F8889B3,0x3FB145113E25B749,0x3FAE9860D18779BC,0x3FA9FFD5F5AB96EA,
-	0x3FA4EC6C4F47777E,0x3F9F16C5B2604C3A,0x3F9413D801124DB7,0x3F824F668CBB5BDF,
-	0xBF55B3FA2EE30D66,0xBF86541863B38183,0xBF94031BBBD551DE,0xBF9BAFC27DC5E769,
-	0xBFA102B3683C57EC,0xBFA3731E608CC6E4,0xBFA520C9F5B5DEBD,0xBFA609DC89BE6ECE,
-	0xBFA632B83BC5F52F,0xBFA5A58885841AD4,0xBFA471A5D2FF02F3,0xBFA2AAD5CD0377C7,
-	0xBFA0686FFE4B9B05,0xBF9B88DE413ACB69,0xBF95B4EF6D93F1C5,0xBF8F1B72860B27FA,
-	0xBF8296A865CDF612,0xBF691BEEDABE928B,0x3F65C04E6AF9D4F1,0x3F8035D8FFCDB0F8,
-	0x3F89BED23C431BE3,0x3F90E737811A1D21,0x3F941C2040BD7CB1,0x3F967046EC629A09,
-	0x3F97DE27ECE9ED89,0x3F98684DE31E7040,0x3F9818C4B07718FA,0x3F97005261F91F60,
-	0x3F95357FDD157646,0x3F92D37C696C572A,0x3F8FF1CFF2BEECB5,0x3F898D20C7A72AC4,
-	0x3F82BC5B3B0AE2DF,0x3F7784A1B8E9E667,0x3F637BB14081726B,0xBF4B2DACA70C60A9,
-	0xBF6EFB00AD083727,0xBF7A313758DC6AE9,0xBF819D6A99164BE0,0xBF8533F57533403B,
-	0xBF87CD120DB5D340,0xBF89638549CD25DE,0xBF89FB8B8D37B1BB,0xBF89A21163F9204E,
-	0xBF886BA8931297D4,0xBF8673477783D71E,0xBF83D8E1CB165DB8,0xBF80BFEA7216142A,
-	0xBF7A9B9BC2E40EBF,0xBF7350E806435A7E,0xBF67D35D3734AB5E,0xBF52ADE8FEAB8DB9,
-	0x3F415669446478E4,0x3F60C56A092AFB48,0x3F6B9F4334A4561F,0x3F724FB908FD87AA,
-	0x3F75CC56DFE382EA,0x3F783A0C23969A7B,0x3F799833C40C3B82,0x3F79F02721981BF3,
-	0x3F7954212AB35261,0x3F77DDE0C5FC15C9,0x3F75AD1C98FE0777,0x3F72E5DACC0849F2,
-	0x3F6F5D7E69DFDE1B,0x3F685EC2CA09E1FD,0x3F611D750E54DF3A,0x3F53C6E392A46D17,
-	0x3F37A046885F3365,0xBF3BB034D2EE45C2,0xBF5254267B04B482,0xBF5C0516F9CECDC6,
-	0xBF61E5736853564D,0xBF64C464B9CC47AB,0xBF669C1AEF258F56,0xBF67739985DD0E60,
-	0xBF675AFD6446395B,0xBF666A0C909B4F78,0xBF64BE9879A7A07B,0xBF627AC74B119DBD,
-	0xBF5F86B04069DC9B,0xBF597BE8F754AF5E,0xBF531F3EAAE9A1B1,0xBF496D3DE6AD7EA3,
-	0xBF3A05FFDE4670CF,0xBF06DF95C93A85CA,0x3F31EE2B2C6547AC,0x3F41E694A378C129,
-	0x3F4930BF840E23C9,0x3F4EBB5D05A0D47D,0x3F51404DA0539855,0x3F524698F56B3F33,
-	0x3F527EF85309E28F,0x3F51FE70FE2513DE,0x3F50DF1642009B74,0x3F4E7CDA93517CAE,
-	0x3F4A77AE24F9A533,0x3F45EE226AA69E10,0x3F411DB747374F52,0x3F387F39D229D97F,
-	0x3F2E1B3D39AF5F8B,0x3F18F557BB082715,0xBEFAC04896E68DDB,0xBF20F5BC77DF558A,
-	0xBF2C1B6DF3EE94A4,0xBF3254602A816876,0xBF354E90F6EAC26B,0xBF3709F2E5AF1624,
-	0xBF379FCCB331CE8E,0xBF37327192ADDAD3,0xBF35EA998A894237,0xBF33F4C4977B3489,
-	0xBF317EC5F68E887B,0xBF2D6B1F793EB773,0xBF2786A226B076D9,0xBF219BE6CEC2CA36,
-	0xBF17D7F36D2A3A18,0xBF0AAEC5BBAB42AB,0xBEF01818DC224040,0x3EEF2F6E21093846,
-	0x3F049D6E0060B71F,0x3F0E598CCAFABEFD,0x3F128BC14BE97261,0x3F148703BC70EF6A,
-	0x3F1545E1579CAA25,0x3F14F7DDF5F8D766,0x3F13D10FF9A1BE0C,0x3F1206D5738ECE3A,
-	0x3F0F99F6BF17C5D4,0x3F0AA6D7EA524E96,0x3F0588DDF740E1F4,0x3F0086FB6FEA9839,
-	0x3EF7B28F6D6F5EED,0x3EEEA300DCBAF74A,0x3EE03F904789777C,0x3EC1BFEB320501ED,
-	0xBEC310D8E585A031,0xBED6F55ECA7E151F,0xBEDFDAA5DACDD0B7,0xBEE26944F3CF6E90,
-	0xBEE346894453BD1F,0xBEE2E099305CD5A8,0xBEE190385A7EA8B2,0xBEDF4D5FA2FB6BA2,
-	0xBEDAD4F371257BA0,0xBED62A9CDEB0AB32,0xBED1A6DF97B88316,0xBECB100096894E58,
-	0xBEC3E8A76257D275,0xBEBBF6C29A5150C9,0xBEB296292998088E,0xBEA70A10498F0E5E,
-	0xBE99E52D02F887A1,0xBE88C17F4066D432,0xBE702A716CFF56CA,0x3E409F820F781F78,
-	0x3E643EA99B770FE7,0x3E67DE40CDE0A550,0x3E64F4D534A2335C,0x3E5F194536BDDF7A,
-	0x3E5425CEBE1FA40A,0x3E46D7B7CC631E73,0x3E364746B6582E54,0x3E21FC07B13031DE,
-	0x3E064C3D91CF7665,0x3DE224F901A0AFC7,0x3DA97D57859C74A4,0x0000000000000000,
+	 1.000047730261351741631870027, 1.000070326525919428561905988, 1.000026295486963423542192686, 0.999910424773336803383472216,
+	 0.999715744379055859525351480, 0.999433014919733908598686867, 0.999050085771328588712947294, 0.998551121919525108694415394,
+	 0.997915706233591937035498631, 0.997117832692634098457062919, 0.996124815495205595539118804, 0.994896148570364013963285288,
+	 0.993382359323431773923118726, 0.991523909003057091204880180, 0.989250199364479221308954493, 0.986478750833182482793404233,
+	 0.983114620682589257505412661, 0.979050130425507592057954298, 0.974164969358674692756494551, 0.968326735771705471300663248,
+	 0.961391968634788374181709969, 0.953207710646355677042151910, 0.943613628528589098998224927, 0.932444698727279863703643059,
+	 0.919534446669115101968827730, 0.904718706053873278349897191, 0.887839842029686909796737382, 0.868751359331251915563143484,
+	 0.847322794437510795617640724, 0.823444770447693374926245724, 0.797034075604916458779314326, 0.768038612100722994924240083,
+	 0.736442051783192774827568883, 0.702268030364621043126760469, 0.665583712234169455612686761, 0.626502564400415073997407944,
+	 0.585186190589438104403541274, 0.541845095055891845525763983, 0.496738269945924404424886234, 0.450171529567763739621000241,
+	 0.402494548939336449500103754, 0.354096601546017020201162495, 0.305401031227847563620514393, 0.256858534249934655768754510,
+	 0.208939368513054252174399039, 0.162124646097439151226637932, 0.116896901459689991908952322, 0.073730159227936173382822460,
+	 0.033079751373986221452128120,-0.004627847551233893637345762,-0.039004887382349466562470042,-0.069711629260494178961238276,
+	-0.096464776709362487494558991,-0.119044790560825133884925719,-0.137301851759562276722448360,-0.151160268717908163882412964,
+	-0.160621165999489917686204876,-0.165763337555641210308010614,-0.166742199141503621984128358,-0.163786829309547077304642926,
+	-0.157195144771094669211564110,-0.147327312088839507131510231,-0.134597551740997606328775760,-0.119464540741507418974975963,
+	-0.102420664473805989036492292,-0.083980405628003879092702277,-0.064668186778692057781192659,-0.045006002136687713044427284,
+	-0.025501182606377806316722001,-0.006634636085273460347211394, 0.011150108072625494748386643, 0.027456744995838545247979212,
+	 0.041944658451493331552395460, 0.054335772988313046916175608, 0.064419613137017092685532305, 0.072056443764197217194400480,
+	 0.077178424602408784993556878, 0.079788772844964592212413379, 0.079958988468210145938996902, 0.077824255600564926083073658,
+	 0.073577187846729327769246254, 0.067460134194076051827870799, 0.059756303384108616638670242, 0.050779997099921050929260957,
+	 0.040866264989502618099059816, 0.030360306751458156215850437, 0.019606947961234157812304701, 0.008940507097049575288560952,
+	-0.001324648208126466466388882,-0.010902586500777250097526938,-0.019543107356485005243751374,-0.027037657667711743197935803,
+	-0.033223730539404389139335194,-0.037987660680654206091233505,-0.041265784496258707536586741,-0.043043987097204458591725995,
+	-0.043355710312406585404954029,-0.042278543756813086185175621,-0.039929563528408616723819335,-0.036459618831699062979634363,
+	-0.032046794692908199542191738,-0.026889298182776331241905510,-0.021198025763611533928143515,-0.015189070430455576393713457,
+	-0.009076419455364113236806034,-0.003065077316892155564337363, 0.002655175361548794011473662, 0.007915206247809156159256361,
+	 0.012570993866018958726171739, 0.016507022146950881685834034, 0.019638542128970374461838233, 0.021912677934460975809338734,
+	 0.023308395228452325614876273, 0.023835389125096861917540991, 0.023531983633596965932444078, 0.022462165098004915897433875,
+	 0.020711896771322700627759872, 0.018384880003473082210607714, 0.015597939105523964467558962, 0.012476211636472618604631890,
+	 0.009148323764166686397625305, 0.005741721847351755579624832, 0.002378317065490789024989615,-0.000829419425005380466127403,
+	-0.003781796760683148444365242,-0.006394592475568152724341164,-0.008601029202315702004710829,-0.010353009833494400057651852,
+	-0.011621609729198234539637724,-0.012396851839770069853008394,-0.012686815497510708569683935,-0.012516151297987356677543502,
+	-0.011924092281628086154032786,-0.010962065062340150406461348,-0.009691013345942120493781147,-0.008178550345073604815882007,
+	-0.006496056025074358440674072,-0.004715830178801836899959987,-0.002908403455554361104196115,-0.001140096220006421448914247,
+	 0.000529099845866712065883819, 0.002047259427257062253113773, 0.003371840725899812995364213, 0.004470560830528139475981142,
+	 0.005321826318522163493107691, 0.005914733331712991419581993, 0.006248666963769690732566353, 0.006332543236118748190832672,
+	 0.006183747823531677602348910, 0.005826833745009315536356187, 0.005292045316197638814281756, 0.004613737750803969042689978,
+	 0.003828761006839943078355892, 0.002974873016054367744903653, 0.002089241623845963964634098, 0.001207086791118088800120467,
+	 0.000360505313776118753877481,-0.000422490021201840063209965,-0.001118695810940623525803206,-0.001710197865787731110603920,
+	-0.002184605984988852254297109,-0.002535053949380879686342771,-0.002759983640474954029453425,-0.002862739419386348127538611,
+	-0.002851004510552685496799219,-0.002736115017663406229209144,-0.002532289317276390557681642,-0.002255810970882980801693884,
+	-0.001924202080457771161722813,-0.001555421358101014960712005,-0.001167117308478276627506376,-0.000775962090624877551779670,
+	-0.000397086112821087974713435,-0.000043627508742770710237387, 0.000273595371614305691784774, 0.000546286179945486565119606,
+	 0.000768750680536383766867925, 0.000937862797633428843004089, 0.001052928740415311594305625, 0.001115464566897328381120391,
+	 0.001128904823558016723081265, 0.001098261208043675284801166, 0.001029750572351520628011645, 0.000930411077785372455858925,
+	 0.000807724029027989654482000, 0.000669256978018619233528064, 0.000522341243078797709889494, 0.000373794189875729877727689,
+	 0.000229693626208723626408101, 0.000095208625460110475721871,-0.000025511844279469758173208,-0.000129393822077144692462430,
+	-0.000214440509776957504047001,-0.000279687383686450809737456,-0.000325117484787396354272565,-0.000351545144152561614761532,
+	-0.000360476947384593608518510,-0.000353958823942885139873099,-0.000334417806276329982514278,-0.000304506298090264292902779,
+	-0.000266955691183075056582136,-0.000224444953912546549387383,-0.000179488462294699944012469,-0.000134345936549333598141603,
+	-0.000090955956048889888797271,-0.000050893220267083281950406,-0.000015348557788785960678823, 0.000014870297520588306796089,
+	 0.000039319915274267510328903, 0.000057887658269859997505705, 0.000070747063526119185008535, 0.000078305819543209774719408,
+	 0.000081149939344861922907622, 0.000079987451948008292520673, 0.000075594520611004130655058, 0.000068766382254997158183021,
+	 0.000060274927715552435942073, 0.000050834144795034220151546, 0.000041074060306237671633470, 0.000031523273709852359548023,
+	 0.000022599698095009569128290, 0.000014608732178951863478521, 0.000007747790946751235789929, 0.000002115927046159247276264,
+	-0.000002272821614624657917699,-0.000005473727618614671290435,-0.000007594607649309153682893,-0.000008779148282948222000235,
+	-0.000009191289914471795693680,-0.000009001415957147717553273,-0.000008374862616584595860708,-0.000007463035714495605026032,
+	-0.000006397209079216532043657,-0.000005284894977678962862369,-0.000004208528817468251939280,-0.000003226102468093129124012,
+	-0.000002373314390120065336351,-0.000001666778737492929471595,-0.000001107845639559032712541,-0.000000686624974759576246945,
+	-0.000000385868818649388185867,-0.000000184445440432801241354,-0.000000060222272723601931954, 0.000000007740724047001495273,
+	 0.000000037708832885684096027, 0.000000044457942869060847864, 0.000000039034296310091607592, 0.000000028962932871006776366,
+	 0.000000018763994698223029203, 0.000000010636937008622986639, 0.000000005187099504706206719, 0.000000002093670467469700098,
+	 0.000000000648951812097509606, 0.000000000132018063854003986, 0.000000000011591335682393882, 0.000000000000000000000000000,
 
-	// extra padding needed for interpolation
-	0x0000000000000000
+	 0.000000000000000000000000000 // 8bitbubsy: one extra zero is required for interpolation look-up
 };
-
-const double *get_minblep_table(void) { return (const double *)minblepdata; }
 
 #define LERP(x, y, z) ((x) + ((y) - (x)) * (z))
 
@@ -241,9 +242,9 @@ static void blepAdd(blep_t *b, double dOffset, double dAmplitude)
 {
 	double f = dOffset * BLEP_SP;
 
-	int32_t i = (int32_t)f; // get integer part of f
-	const double *dBlepSrc = get_minblep_table() + i;
-	f -= i; // remove integer part from f
+	int32_t i = (int32_t)f; // 8bitbubsy: get integer part of f
+	const double *dBlepSrc = dMinblepData + i;
+	f -= i; // 8bitbubsy: remove integer part from f
 
 	i = b->index;
 	for (int32_t n = 0; n < BLEP_NS; n++)
@@ -281,7 +282,7 @@ void paulaSetMasterVolume(int32_t vol) // 0..256
 
 void resetCachedMixerPeriod(void)
 {
-	paulaVoice_t *v = paula;
+	paula_t *v = paula;
 	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++)
 	{
 		v->oldPeriod = -1;
@@ -296,7 +297,7 @@ void resetCachedMixerPeriod(void)
 
 void paulaSetPeriod(int32_t ch, uint16_t period)
 {
-	paulaVoice_t *v = &paula[ch];
+	paula_t *v = &paula[ch];
 
 	int32_t realPeriod = period;
 	if (realPeriod == 0)
@@ -316,17 +317,18 @@ void paulaSetPeriod(int32_t ch, uint16_t period)
 		v->dOldVoiceDeltaMul = 1.0 / v->dOldVoiceDelta;
 	}
 
+	// to be read on next sampling step (or on DMA restart)
 	v->AUD_PER_delta = v->dOldVoiceDelta;
+	v->AUD_PER_deltamul = v->dOldVoiceDeltaMul;
 
 	// set BLEP stuff
-	v->dDeltaMul = v->dOldVoiceDeltaMul;
-	if (v->dLastDelta == 0.0)
-		v->dLastDelta = v->AUD_PER_delta;
+	if (v->dLastDelta    == 0.0) v->dLastDelta    = v->AUD_PER_delta;
+	if (v->dLastDeltaMul == 0.0) v->dLastDeltaMul = v->AUD_PER_deltamul;
 }
 
 void paulaSetVolume(int32_t ch, uint16_t vol)
 {
-	paulaVoice_t *v = &paula[ch];
+	paula_t *v = &paula[ch];
 
 	int32_t realVol = vol;
 
@@ -334,7 +336,7 @@ void paulaSetVolume(int32_t ch, uint16_t vol)
 	if (realVol > 64)
 		realVol = 64;
 
-	// multiplying by this also scales the sample from -128 .. 127 -> -1.0 .. ~0.99
+	// multiplying by this also scales the sample from -128..127 -> -1.0 .. ~0.99
 	v->AUD_VOL = realVol * (1.0 / (128.0 * 64.0));
 }
 
@@ -368,7 +370,7 @@ void paulaStopAllDMAs(void)
 {
 	lockMixer();
 
-	paulaVoice_t *v = paula;
+	paula_t *v = paula;
 	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++)
 	{
 		v->DMA_active = false;
@@ -381,7 +383,7 @@ void paulaStopAllDMAs(void)
 
 void paulaStartAllDMAs(void)
 {
-	paulaVoice_t *v;
+	paula_t *v;
 
 	lockMixer();
 
@@ -402,7 +404,7 @@ void paulaStartAllDMAs(void)
 		** during DMA start, but it's good enough.
 		*/
 
-		v->dDelta = v->dLastDelta = v->AUD_PER_delta;
+		v->dDelta = v->AUD_PER_delta;
 		v->location = v->AUD_LC;
 		v->lengthCounter = v->AUD_LEN;
 
@@ -412,15 +414,20 @@ void paulaStartAllDMAs(void)
 		v->sampleCounter = 2;
 
 		// set current sample point
-		v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128 .. 127 -> -1.0 .. ~0.99
+		v->dSample = v->AUD_DAT[0] * v->AUD_VOL;
 
 		// progress AUD_DAT buffer
 		v->AUD_DAT[0] = v->AUD_DAT[1];
 		v->sampleCounter--;
 
-		v->dPhase = v->dLastPhase = 0.0;
+		// set BLEP stuff
+		v->dDeltaMul = v->AUD_PER_deltamul;
+		v->dLastPhase = 0.0;
+		v->dLastDelta = v->dDelta;
+		v->dLastDeltaMul = v->dDeltaMul;
 		v->dBlepOffset = 0.0;
 
+		v->dPhase = 0.0;
 		v->DMA_active = true;
 	}
 
@@ -431,7 +438,10 @@ static void mixChannels(int32_t numSamples)
 {
 	double *dMixBufSelect[AMIGA_VOICES] = { dMixBufferL, dMixBufferR, dMixBufferR, dMixBufferL };
 
-	paulaVoice_t *v = paula;
+	memset(dMixBufferL, 0, numSamples * sizeof (double));
+	memset(dMixBufferR, 0, numSamples * sizeof (double));
+
+	paula_t *v = paula;
 	blep_t *bSmp = blep;
 
 	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++, bSmp++)
@@ -459,9 +469,17 @@ static void mixChannels(int32_t numSamples)
 			v->dPhase += v->dDelta;
 			if (v->dPhase >= 1.0) // next sample point
 			{
-				v->dPhase -= 1.0; // we use single-step deltas (< 1.0), so this is safe
+				v->dPhase -= 1.0;
 
-				v->dDelta = v->AUD_PER_delta; // Paula only updates period (delta) during sample fetching
+				// set BLEP stuff
+				v->dLastPhase = v->dPhase;
+				v->dLastDelta = v->dDelta;
+				v->dLastDeltaMul = v->dDeltaMul;
+				v->dBlepOffset = v->dLastPhase * v->dLastDeltaMul;
+
+				// Paula only updates period (delta) during period refetching (this stage)
+				v->dDelta = v->AUD_PER_delta;
+				v->dDeltaMul = v->AUD_PER_deltamul;
 
 				if (v->sampleCounter == 0)
 				{
@@ -480,20 +498,15 @@ static void mixChannels(int32_t numSamples)
 				}
 
 				/* Pre-compute current sample point.
-				** Output volume is only read from AUD_VOL at this stage,
+				** Output volume is only read from AUDxVOL at this stage,
 				** and we don't emulate volume PWM anyway, so we can
-				** pre-multiply by volume at this point.
+				** pre-multiply by volume here.
 				*/
-				v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128 .. 127 -> -1.0 .. ~0.99
+				v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128..127 * 0.0 .. 1.0
 
 				// progress AUD_DAT buffer
 				v->AUD_DAT[0] = v->AUD_DAT[1];
 				v->sampleCounter--;
-
-				// setup BLEP stuff
-				v->dBlepOffset = v->dPhase * v->dDeltaMul;
-				v->dLastPhase = v->dPhase;
-				v->dLastDelta = v->dDelta;
 			}
 		}
 	}
@@ -514,87 +527,311 @@ static inline int32_t random32(void)
 	return randSeed;
 }
 
-void paulaMixSamples(int16_t *target, int32_t numSamples)
+/* High-quality /2 decimator from
+** https://www.musicdsp.org/en/latest/Filters/231-hiqh-quality-2-decimators.html
+*/
+
+static double R1_L, R2_L, R3_L, R4_L, R5_L, R6_L, R7_L, R8_L, R9_L;
+static double R1_R, R2_R, R3_R, R4_R, R5_R, R6_R, R7_R, R8_R, R9_R;
+
+void clearMixerDownsamplerStates(void)
+{
+	R1_L = R2_L = R3_L = R4_L = R5_L = R6_L = R7_L = R8_L = R9_L = 0.0;
+	R1_R = R2_R = R3_R = R4_R = R5_R = R6_R = R7_R = R8_R = R9_R = 0.0;
+}
+
+static double decimate2x_L(double x0, double x1)
+{
+	const double h0 = 8192.0 / 16384.0;
+	const double h1 = 5042.0 / 16384.0;
+	const double h3 = -1277.0 / 16384.0;
+	const double h5 = 429.0 / 16384.0;
+	const double h7 = -116.0 / 16384.0;
+	const double h9 = 18.0 / 16384.0;
+
+	double h9x0 = h9 * x0;
+	double h7x0 = h7 * x0;
+	double h5x0 = h5 * x0;
+	double h3x0 = h3 * x0;
+	double h1x0 = h1 * x0;
+	double R10 = R9_L + h9x0;
+
+	R9_L = R8_L + h7x0;
+	R8_L = R7_L + h5x0;
+	R7_L = R6_L + h3x0;
+	R6_L = R5_L + h1x0;
+	R5_L = R4_L + h1x0 + h0 * x1;
+	R4_L = R3_L + h3x0;
+	R3_L = R2_L + h5x0;
+	R2_L = R1_L + h7x0;
+	R1_L = h9x0;
+
+	return R10;
+}
+
+static double decimate2x_R(double x0, double x1)
+{
+	const double h0 = 8192.0 / 16384.0;
+	const double h1 = 5042.0 / 16384.0;
+	const double h3 = -1277.0 / 16384.0;
+	const double h5 = 429.0 / 16384.0;
+	const double h7 = -116.0 / 16384.0;
+	const double h9 = 18.0 / 16384.0;
+
+	double h9x0 = h9 * x0;
+	double h7x0 = h7 * x0;
+	double h5x0 = h5 * x0;
+	double h3x0 = h3 * x0;
+	double h1x0 = h1 * x0;
+	double R10 = R9_R + h9x0;
+
+	R9_R = R8_R + h7x0;
+	R8_R = R7_R + h5x0;
+	R7_R = R6_R + h3x0;
+	R6_R = R5_R + h1x0;
+	R5_R = R4_R + h1x0 + h0 * x1;
+	R4_R = R3_R + h3x0;
+	R3_R = R2_R + h5x0;
+	R2_R = R1_R + h7x0;
+	R1_R = h9x0;
+
+	return R10;
+}
+
+// ------------------------------------------------------
+
+static inline void processMixedSamplesAmigaPanning(uint32_t i, int16_t *out)
 {
 	int32_t smp32;
-	double dOut[2], dPrng;
+	double dPrng;
 
-	mixChannels(numSamples);
+	double dL = dMixBufferL[i];
+	double dR = dMixBufferR[i];
 
-	// apply filter, normalize, adjust stereo separation (if needed), dither and quantize
-	
-	if (audio.stereoSeparation == 100) // Amiga panning (no stereo separation)
+	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+
+	// left channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dL = (dL + dPrng) - dPrngStateL;
+	dPrngStateL = dPrng;
+	smp32 = (int32_t)dL;
+	CLAMP16(smp32);
+	out[0] = (int16_t)smp32;
+
+	// right channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dR = (dR + dPrng) - dPrngStateR;
+	dPrngStateR = dPrng;
+	smp32 = (int32_t)dR;
+	CLAMP16(smp32);
+	out[1] = (int16_t)smp32;
+}
+
+static inline void processMixedSamples(uint32_t i, int16_t *out)
+{
+	int32_t smp32;
+	double dPrng;
+
+	double dL = dMixBufferL[i];
+	double dR = dMixBufferR[i];
+
+	// apply stereo separation
+	const double dOldL = dL;
+	const double dOldR = dR;
+	double dMid = (dOldL + dOldR) * STEREO_NORM_FACTOR;
+	double dSide = (dOldL - dOldR) * dSideFactor;
+	dL = dMid + dSide;
+	dR = dMid - dSide;
+
+	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+
+	// left channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dL = (dL + dPrng) - dPrngStateL;
+	dPrngStateL = dPrng;
+	smp32 = (int32_t)dL;
+	CLAMP16(smp32);
+	out[0] = (int16_t)smp32;
+
+	// right channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dR = (dR + dPrng) - dPrngStateR;
+	dPrngStateR = dPrng;
+	smp32 = (int32_t)dR;
+	CLAMP16(smp32);
+	out[1] = (int16_t)smp32;
+}
+
+static inline void processMixedSamplesAmigaPanning_2x(uint32_t i, int16_t *out) // 2x oversampling
+{
+	int32_t smp32;
+	double dPrng, dL, dR;
+
+	// 2x downsampling (decimation)
+	const uint32_t offset1 = (i << 1) + 0;
+	const uint32_t offset2 = (i << 1) + 1;
+	dL = decimate2x_L(dMixBufferL[offset1], dMixBufferL[offset2]);
+	dR = decimate2x_R(dMixBufferR[offset1], dMixBufferR[offset2]);
+
+	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+
+	// left channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dL = (dL + dPrng) - dPrngStateL;
+	dPrngStateL = dPrng;
+	smp32 = (int32_t)dL;
+	CLAMP16(smp32);
+	out[0] = (int16_t)smp32;
+
+	// right channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dR = (dR + dPrng) - dPrngStateR;
+	dPrngStateR = dPrng;
+	smp32 = (int32_t)dR;
+	CLAMP16(smp32);
+	out[1] = (int16_t)smp32;
+}
+
+static inline void processMixedSamples_2x(uint32_t i, int16_t *out) // 2x oversampling
+{
+	int32_t smp32;
+	double dPrng, dL, dR;
+
+	// 2x downsampling (decimation)
+	const uint32_t offset1 = (i << 1) + 0;
+	const uint32_t offset2 = (i << 1) + 1;
+	dL = decimate2x_L(dMixBufferL[offset1], dMixBufferL[offset2]);
+	dR = decimate2x_R(dMixBufferR[offset1], dMixBufferR[offset2]);
+
+	// apply stereo separation
+	const double dOldL = dL;
+	const double dOldR = dR;
+	double dMid = (dOldL + dOldR) * STEREO_NORM_FACTOR;
+	double dSide = (dOldL - dOldR) * dSideFactor;
+	dL = dMid + dSide;
+	dR = dMid - dSide;
+
+	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+
+	// left channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dL = (dL + dPrng) - dPrngStateL;
+	dPrngStateL = dPrng;
+	smp32 = (int32_t)dL;
+	CLAMP16(smp32);
+	out[0] = (int16_t)smp32;
+
+	// right channel - 1-bit triangular dithering (high-pass filtered)
+	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
+	dR = (dR + dPrng) - dPrngStateR;
+	dPrngStateR = dPrng;
+	smp32 = (int32_t)dR;
+	CLAMP16(smp32);
+	out[1] = (int16_t)smp32;
+}
+
+static void processFilters(uint32_t numSamples)
+{
+	double dOut[2];
+
+	if (useA1200LowPassFilter)
 	{
-		for (int32_t i = 0; i < numSamples; i++)
+		for (uint32_t i = 0; i < numSamples; i++)
 		{
 			dOut[0] = dMixBufferL[i];
 			dOut[1] = dMixBufferR[i];
 
-			// clear what we read
-			dMixBufferL[i] = 0.0;
-			dMixBufferR[i] = 0.0;
+			// low-pass RC filter
+			RCLowPassFilterStereo(&filterLoA1200, dOut, dOut);
 
+			// high-pass RC filter
 			RCHighPassFilterStereo(&filterHiA1200, dOut, dOut);
 
-			double dL = dOut[0] * dMixNormalize;
-			double dR = dOut[1] * dMixNormalize;
-
-			// left channel - 1-bit triangular dithering (high-pass filtered)
-			dPrng = random32() * (0.5 / INT32_MAX); // -0.5 .. 0.5
-			dL = (dL + dPrng) - dPrngStateL;
-			dPrngStateL = dPrng;
-			smp32 = (int32_t)dL;
-			CLAMP16(smp32);
-			*target++ = (int16_t)smp32;
-
-			// right channel - 1-bit triangular dithering (high-pass filtered)
-			dPrng = random32() * (0.5 / INT32_MAX); // -0.5 .. 0.5
-			dR = (dR + dPrng) - dPrngStateR;
-			dPrngStateR = dPrng;
-			smp32 = (int32_t)dR;
-			CLAMP16(smp32);
-			*target++ = (int16_t)smp32;
+			dMixBufferL[i] = dOut[0];
+			dMixBufferR[i] = dOut[1];
 		}
 	}
 	else
 	{
-		for (int32_t i = 0; i < numSamples; i++)
+		for (uint32_t i = 0; i < numSamples; i++)
 		{
 			dOut[0] = dMixBufferL[i];
 			dOut[1] = dMixBufferR[i];
 
-			dMixBufferL[i] = 0.0;
-			dMixBufferR[i] = 0.0;
-
+			// high-pass RC filter
 			RCHighPassFilterStereo(&filterHiA1200, dOut, dOut);
 
-			double dL = dOut[0] * dMixNormalize;
-			double dR = dOut[1] * dMixNormalize;
+			dMixBufferL[i] = dOut[0];
+			dMixBufferR[i] = dOut[1];
+		}
+	}
+}
 
-			// apply stereo separation
-			const double dOldL = dL;
-			const double dOldR = dR;
-			double dMid  = (dOldL + dOldR) * STEREO_NORM_FACTOR;
-			double dSide = (dOldL - dOldR) * dSideFactor;
-			dL = dMid + dSide;
-			dR = dMid - dSide;
-			// -----------------------
+void paulaMixSamples(int16_t *target, uint32_t numSamples)
+{
+	// apply filter, normalize, adjust stereo separation (if needed), dither and quantize
+	
+	if (audio.oversamplingFlag) // 2x oversampling
+	{
+		// mix and filter channels (at 2x rate)
+		mixChannels(numSamples*2);
+		processFilters(numSamples*2);
 
-			// left channel
-			dPrng = random32() * (0.5 / INT32_MAX);
-			dL = (dL + dPrng) - dPrngStateL;
-			dPrngStateL = dPrng;
-			smp32 = (int32_t)dL;
-			CLAMP16(smp32);
-			*target++ = (int16_t)smp32;
+		// downsample, normalize and dither
+		int16_t out[2];
+		int16_t *outStream = target;
+		if (audio.stereoSeparation == 100)
+		{
+			for (uint32_t i = 0; i < numSamples; i++)
+			{
+				processMixedSamplesAmigaPanning_2x(i, out);
+				*outStream++ = out[0];
+				*outStream++ = out[1];
+			}
+		}
+		else
+		{
+			for (uint32_t i = 0; i < numSamples; i++)
+			{
+				processMixedSamples_2x(i, out);
+				*outStream++ = out[0];
+				*outStream++ = out[1];
+			}
+		}
+	}
+	else
+	{
+		mixChannels(numSamples);
+		processFilters(numSamples);
 
-			// right channel
-			dPrng = random32() * (0.5 / INT32_MAX);
-			dR = (dR + dPrng) - dPrngStateR;
-			dPrngStateR = dPrng;
-			smp32 = (int32_t)dR;
-			CLAMP16(smp32);
-			*target++ = (int16_t)smp32;
+		// normalize and dither
+		int16_t out[2];
+		int16_t *outStream = target;
+		if (audio.stereoSeparation == 100)
+		{
+			for (uint32_t i = 0; i < numSamples; i++)
+			{
+				processMixedSamplesAmigaPanning(i, out);
+				*outStream++ = out[0];
+				*outStream++ = out[1];
+			}
+		}
+		else
+		{
+			for (uint32_t i = 0; i < numSamples; i++)
+			{
+				processMixedSamples(i, out);
+				*outStream++ = out[0];
+				*outStream++ = out[1];
+			}
 		}
 	}
 }
@@ -639,16 +876,49 @@ void paulaOutputSamples(int16_t *stream, int32_t numSamples)
 
 void paulaClearFilterState(void)
 {
+	clearRCFilterState(&filterLoA1200);
 	clearRCFilterState(&filterHiA1200);
 }
 
 static void calculateFilterCoeffs(void)
 {
-	// Amiga 1200 1-pole (6dB/oct) static RC high-pass filter
-	double R = 1390.0; // R324 (1K ohm resistor) + R325 (390 ohm resistor)
-	double C = 2.2e-5; // C334 (22uF capacitor)
-	double fc = 1.0 / (MY_TWO_PI * R * C); // cutoff = ~5.20Hz
-	calcRCFilterCoeffs(audio.outputFreq, fc, &filterHiA1200);
+	/* Amiga 1200 filter emulation
+	**
+	** NOTE: Doesn't include the Sallen-Key "LED" filter because AHX never uses it.
+	**
+	** Keep in mind that many of the Amiga schematics that are floating around on
+	** the internet have wrong RC values! They were most likely very early schematics
+	** that didn't change before production (or changes that never reached production).
+	** This has been confirmed by measuring the components on several Amiga motherboards.
+	**
+	** Correct values for A1200, all revs (A1200_R2.pdf):
+	** - 1-pole RC 6dB/oct low-pass: R=680 ohm, C=6800pF
+	** - Sallen-key low-pass ("LED"): R1/R2=10k ohm, C1=6800pF, C2=3900pF (same as A500)
+	** - 1-pole RC 6dB/oct high-pass: R=1390 ohm (1000+390), C=22uF
+	*/
+	double dAudioFreq = audio.outputFreq;
+	double R, C, fc;
+
+	if (audio.oversamplingFlag)
+		dAudioFreq *= 2.0; // 2x oversampling
+
+	// A1200 1-pole (6db/oct) static RC low-pass filter:
+	R = 680.0;  // R321 (680 ohm)
+	C = 6.8e-9; // C321 (6800pF)
+	fc = 1.0 / (MY_TWO_PI * R * C); // cutoff = ~34419.32Hz
+
+	useA1200LowPassFilter = false;
+	if (dAudioFreq/2.0 > fc)
+	{
+		calcRCFilterCoeffs(dAudioFreq, fc, &filterLoA1200);
+		useA1200LowPassFilter = true;
+	}
+
+	// A1200 1-pole (6dB/oct) static RC high-pass filter:
+	R = 1390.0; // R324 (1K ohm resistor) + R325 (390 ohm resistor)
+	C = 2.2e-5; // C334 (22uF capacitor)
+	fc = 1.0 / (MY_TWO_PI * R * C); // cutoff = ~5.20Hz
+	calcRCFilterCoeffs(dAudioFreq, fc, &filterHiA1200);
 
 	paulaClearFilterState();
 }
@@ -688,9 +958,16 @@ bool paulaInit(int32_t audioFrequency)
 	paulaSetStereoSeparation(20);
 	paulaSetMasterVolume(256);
 
+	// we do 2x oversampling if the audio output rate is below 96kHz
+	audio.oversamplingFlag = (audio.outputFreq < 96000);
+
 	dPeriodToDeltaDiv = (double)PAULA_PAL_CLK / audio.outputFreq;
+	if (audio.oversamplingFlag)
+		dPeriodToDeltaDiv *= 0.5;
 
 	int32_t maxSamplesToMix = (int32_t)ceil(audio.outputFreq / amigaCIAPeriod2Hz(AHX_HIGHEST_CIA_PERIOD));
+	if (audio.oversamplingFlag)
+		maxSamplesToMix *= 2;
 
 	const int32_t bufferBytes = maxSamplesToMix * sizeof (double);
 

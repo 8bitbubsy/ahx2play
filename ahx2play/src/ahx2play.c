@@ -19,7 +19,7 @@
 #define DEFAULT_WAVRENDER_LOOPS 0
 
 // set to true if you want ahx2play to always render to WAV
-#define DEFAULT_WAVRENDER_MODE_FLAG false
+#define DEFAULT_WAVRENDER_MODE_FLAG true
 
 // default settings
 static bool renderToWavFlag = DEFAULT_WAVRENDER_MODE_FLAG;
