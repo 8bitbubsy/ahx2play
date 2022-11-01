@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include "paula.h" // AMIGA_VOICES
+#include "paula.h" // PAULA_VOICES
 #include <math.h> // ceil()
 #include "replayer.h" // SIDInterrupt(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
 
@@ -32,7 +32,7 @@ static double *dMixBufferL, *dMixBufferR, dPrngStateL, dPrngStateR, dSideFactor,
 
 // globalized
 audio_t audio;
-paula_t paula[AMIGA_VOICES];
+paulaVoice_t paula[PAULA_VOICES];
 
 /*
 ** Math replacement
@@ -164,7 +164,7 @@ typedef struct blep_t
 	double dBuffer[BLEP_RNS+1], dLastValue;
 } blep_t;
 
-static blep_t blep[AMIGA_VOICES];
+static blep_t blep[PAULA_VOICES];
 
 static const double dMinblepData[256 + 1] =
 {
@@ -238,7 +238,7 @@ static const double dMinblepData[256 + 1] =
 
 #define LERP(x, y, z) ((x) + ((y) - (x)) * (z))
 
-static void blepAdd(blep_t *b, double dOffset, double dAmplitude)
+static inline void blepAdd(blep_t *b, double dOffset, double dAmplitude)
 {
 	double f = dOffset * BLEP_SP;
 
@@ -258,7 +258,7 @@ static void blepAdd(blep_t *b, double dOffset, double dAmplitude)
 	b->samplesLeft = BLEP_NS;
 }
 
-static double blepRun(blep_t *b, double dInput)
+static inline double blepRun(blep_t *b, double dInput)
 {
 	double dBlepOutput = dInput + b->dBuffer[b->index];
 	b->dBuffer[b->index] = 0.0;
@@ -277,19 +277,9 @@ void paulaSetMasterVolume(int32_t vol) // 0..256
 	audio.masterVol = CLAMP(vol, 0, 256);
 
 	// normalization w/ phase-inversion (A1200 has a phase-inverted audio signal)
-	dMixNormalize = (NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES)) * (audio.masterVol / 256.0);
+	dMixNormalize = (NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES)) * (audio.masterVol / 256.0);
 }
 
-void resetCachedMixerPeriod(void)
-{
-	paula_t *v = paula;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++)
-	{
-		v->oldPeriod = -1;
-		v->dOldVoiceDelta = 0.0;
-		v->dOldVoiceDeltaMul = 1.0;
-	}
-}
 
 /* The following routines are only safe to call from the mixer thread,
 ** or from another thread if the DMAs are stopped first.
@@ -297,46 +287,36 @@ void resetCachedMixerPeriod(void)
 
 void paulaSetPeriod(int32_t ch, uint16_t period)
 {
-	paula_t *v = &paula[ch];
+	paulaVoice_t *v = &paula[ch];
 
 	int32_t realPeriod = period;
 	if (realPeriod == 0)
-		realPeriod = 1+65535; // confirmed behavior on real Amiga
+		realPeriod = 65535; // On Amiga: period 0 = one full cycle with period 65536, then period 65535 for the rest
 	else if (realPeriod < 113)
 		realPeriod = 113; // close to what happens on real Amiga (and needed for BLEP synthesis)
 
-	// if the new period was the same as the previous period, use cached delta
-	if (realPeriod != v->oldPeriod)
-	{
-		v->oldPeriod = realPeriod;
+	// to be read on next sampling step (or on DMA trigger)
+	v->AUD_PER_delta = dPeriodToDeltaDiv / realPeriod;
+	v->AUD_PER_deltamul = 1.0 / v->AUD_PER_delta; // for BLEP synthesis (prevents division in inner mixing loop)
 
-		// this period is not cached, calculate mixer deltas
-		v->dOldVoiceDelta = dPeriodToDeltaDiv / realPeriod;
+	// handle BLEP synthesis edge-cases
 
-		// for BLEP synthesis (prevents division in inner mix loop)
-		v->dOldVoiceDeltaMul = 1.0 / v->dOldVoiceDelta;
-	}
+	if (v->dLastDelta == 0.0)
+		v->dLastDelta = v->AUD_PER_delta;
 
-	// to be read on next sampling step (or on DMA restart)
-	v->AUD_PER_delta = v->dOldVoiceDelta;
-	v->AUD_PER_deltamul = v->dOldVoiceDeltaMul;
-
-	// set BLEP stuff
-	if (v->dLastDelta    == 0.0) v->dLastDelta    = v->AUD_PER_delta;
-	if (v->dLastDeltaMul == 0.0) v->dLastDeltaMul = v->AUD_PER_deltamul;
+	if (v->dLastDeltaMul == 0.0)
+		v->dLastDeltaMul = v->AUD_PER_deltamul;
 }
 
 void paulaSetVolume(int32_t ch, uint16_t vol)
 {
-	paula_t *v = &paula[ch];
+	paulaVoice_t *v = &paula[ch];
 
-	int32_t realVol = vol;
-
-	realVol &= 127;
+	int32_t realVol = vol & 127;
 	if (realVol > 64)
 		realVol = 64;
 
-	// multiplying by this also scales the sample from -128..127 -> -1.0 .. ~0.99
+	// multiplying sample point by this also scales the sample from -128..127 -> -1.0 .. ~0.99
 	v->AUD_VOL = realVol * (1.0 / (128.0 * 64.0));
 }
 
@@ -360,153 +340,147 @@ void paulaSetData(int32_t ch, const int8_t *src)
 	paula[ch].AUD_LC = src;
 }
 
-/* The following DMA functions are NOT to be
-** used inside the audio thread!
-** These are hard-written to be used the way AHX interfaces
-** Paula (it initializes it outside of the replayer ticker).
-*/
-
-void paulaStopAllDMAs(void)
+static inline void refetchPeriod(paulaVoice_t *v) // Paula stage
 {
-	lockMixer();
+	// set BLEP stuff
+	v->dLastPhase = v->dPhase;
+	v->dLastDelta = v->dDelta;
+	v->dLastDeltaMul = v->dDeltaMul;
+	v->dBlepOffset = v->dLastPhase * v->dLastDeltaMul;
 
-	paula_t *v = paula;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++)
-	{
-		v->DMA_active = false;
-		v->location = v->AUD_LC = emptySample;
-		v->lengthCounter = v->AUD_LEN = 1;
-	}
+	// Paula only updates period (delta) during period refetching (this stage)
+	v->dDelta = v->AUD_PER_delta;
+	v->dDeltaMul = v->AUD_PER_deltamul;
 
-	unlockMixer();
+	v->nextSampleStage = true;
 }
 
-void paulaStartAllDMAs(void)
+static void startPaulaDMA(int32_t ch)
 {
-	paula_t *v;
+	paulaVoice_t *v = &paula[ch];
 
-	lockMixer();
+	if (v->AUD_LC == NULL)
+		v->AUD_LC = emptySample;
 
-	v = paula;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++)
+	// immediately update AUD_LC/AUD_LEN
+	v->location = v->AUD_LC;
+	v->lengthCounter = v->AUD_LEN;
+
+	// make Paula fetch new samples immediately
+	v->sampleCounter = 0;
+	v->DMATriggerFlag = true;
+
+	refetchPeriod(v);
+	v->dPhase = 0.0; // kludge: must be cleared *after* refetchPeriod()
+
+	v->DMA_active = true;
+}
+
+static void stopPaulaDMA(int32_t ch)
+{
+	paula[ch].DMA_active = false;
+}
+
+void paulaSetDMACON(uint16_t bits) // $DFF096 register write (only controls paula DMAs)
+{
+	if (bits & 0x8000)
 	{
-		if (v->AUD_LC == NULL)
-			v->AUD_LC = emptySample;
+		// set
+		if (bits & 1) startPaulaDMA(0);
+		if (bits & 2) startPaulaDMA(1);
+		if (bits & 4) startPaulaDMA(2);
+		if (bits & 8) startPaulaDMA(3);
+	}
+	else
+	{
+		// clear
+		if (bits & 1) stopPaulaDMA(0);
+		if (bits & 2) stopPaulaDMA(1);
+		if (bits & 4) stopPaulaDMA(2);
+		if (bits & 8) stopPaulaDMA(3);
+	}
+}
 
-		if (v->AUD_LEN == 0) // not what happens on a real Amiga, but this is fine for AHX
-			v->AUD_LEN = 1;
+static inline void nextSample(paulaVoice_t *v, blep_t *b)
+{
+	if (v->sampleCounter == 0)
+	{
+		// it's time to read new samples from DMA
 
-		// since AHX has a fixed Paula buffer size, clamp it here
-		if (v->AUD_LEN > MAX_SAMPLE_LENGTH)
-			v->AUD_LEN = MAX_SAMPLE_LENGTH;
+		// don't update AUD_LEN/AUD_LC yet on DMA trigger
+		if (!v->DMATriggerFlag)
+		{
+			if (--v->lengthCounter == 0)
+			{
+				v->lengthCounter = v->AUD_LEN;
+				v->location = v->AUD_LC;
+			}
+		}
 
-		/* This is not really accurate to what happens on Paula
-		** during DMA start, but it's good enough.
-		*/
+		v->DMATriggerFlag = false;
 
-		v->dDelta = v->AUD_PER_delta;
-		v->location = v->AUD_LC;
-		v->lengthCounter = v->AUD_LEN;
-
-		// pre-fill AUDxDAT buffer
+		// fill DMA data buffer
 		v->AUD_DAT[0] = *v->location++;
 		v->AUD_DAT[1] = *v->location++;
 		v->sampleCounter = 2;
-
-		// set current sample point
-		v->dSample = v->AUD_DAT[0] * v->AUD_VOL;
-
-		// progress AUD_DAT buffer
-		v->AUD_DAT[0] = v->AUD_DAT[1];
-		v->sampleCounter--;
-
-		// set BLEP stuff
-		v->dDeltaMul = v->AUD_PER_deltamul;
-		v->dLastPhase = 0.0;
-		v->dLastDelta = v->dDelta;
-		v->dLastDeltaMul = v->dDeltaMul;
-		v->dBlepOffset = 0.0;
-
-		v->dPhase = 0.0;
-		v->DMA_active = true;
 	}
 
-	unlockMixer();
+	/* Pre-compute current sample point.
+	** Output volume is only read from AUDxVOL at this stage,
+	** and we don't emulate volume PWM anyway, so we can
+	** pre-multiply by volume here.
+	*/
+	v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128..127 * 0.0 .. 1.0
+
+	// fill BLEP buffer if the new sample differs from the old one
+	if (v->dSample != b->dLastValue)
+	{
+		if (v->dLastDelta > v->dLastPhase)
+			blepAdd(b, v->dBlepOffset, b->dLastValue - v->dSample);
+
+		b->dLastValue = v->dSample;
+	}
+
+	// progress AUD_DAT buffer
+	v->AUD_DAT[0] = v->AUD_DAT[1];
+	v->sampleCounter--;
 }
 
-static void mixChannels(int32_t numSamples)
+static void paulaGenerateSamples(double *dOutL, double *dOutR, int32_t numSamples)
 {
-	double *dMixBufSelect[AMIGA_VOICES] = { dMixBufferL, dMixBufferR, dMixBufferR, dMixBufferL };
+	double *dMixBufSelect[PAULA_VOICES] = { dOutL, dOutR, dOutR, dOutL };
 
-	memset(dMixBufferL, 0, numSamples * sizeof (double));
-	memset(dMixBufferR, 0, numSamples * sizeof (double));
+	memset(dOutL, 0, numSamples * sizeof (double));
+	memset(dOutR, 0, numSamples * sizeof (double));
 
-	paula_t *v = paula;
-	blep_t *bSmp = blep;
+	paulaVoice_t *v = paula;
+	blep_t *b = blep;
 
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, v++, bSmp++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++, v++, b++)
 	{
-		if (!v->DMA_active)
+		if (!v->DMA_active || v->location == NULL || v->AUD_LC == NULL)
 			continue;
 
-		double *dMixBuf = dMixBufSelect[i]; // what output channel to mix into (L, R, R, L)
+		double *dMixBuffer = dMixBufSelect[i]; // what output channel to mix into (L, R, R, L)
 		for (int32_t j = 0; j < numSamples; j++)
 		{
-			double dSmp = v->dSample;
-			if (dSmp != bSmp->dLastValue)
+			if (v->nextSampleStage)
 			{
-				if (v->dLastDelta > v->dLastPhase)
-					blepAdd(bSmp, v->dBlepOffset, bSmp->dLastValue - dSmp);
-
-				bSmp->dLastValue = dSmp;
+				v->nextSampleStage = false;
+				nextSample(v, b); // inlined
 			}
 
-			if (bSmp->samplesLeft > 0)
-				dSmp = blepRun(bSmp, dSmp);
+			double dSample = v->dSample; // current Paula sample, pre-multiplied by volume, scaled to -1.0 .. 0.9921875
+			if (b->samplesLeft > 0)
+				dSample = blepRun(b, dSample);
 
-			dMixBuf[j] += dSmp;
+			dMixBuffer[j] += dSample;
 
 			v->dPhase += v->dDelta;
-			if (v->dPhase >= 1.0) // next sample point
+			if (v->dPhase >= 1.0)
 			{
 				v->dPhase -= 1.0;
-
-				// set BLEP stuff
-				v->dLastPhase = v->dPhase;
-				v->dLastDelta = v->dDelta;
-				v->dLastDeltaMul = v->dDeltaMul;
-				v->dBlepOffset = v->dLastPhase * v->dLastDeltaMul;
-
-				// Paula only updates period (delta) during period refetching (this stage)
-				v->dDelta = v->AUD_PER_delta;
-				v->dDeltaMul = v->AUD_PER_deltamul;
-
-				if (v->sampleCounter == 0)
-				{
-					// it's time to read new samples from DMA
-
-					if (--v->lengthCounter == 0)
-					{
-						v->lengthCounter = v->AUD_LEN;
-						v->location = v->AUD_LC;
-					}
-
-					// fill DMA data buffer
-					v->AUD_DAT[0] = *v->location++;
-					v->AUD_DAT[1] = *v->location++;
-					v->sampleCounter = 2;
-				}
-
-				/* Pre-compute current sample point.
-				** Output volume is only read from AUDxVOL at this stage,
-				** and we don't emulate volume PWM anyway, so we can
-				** pre-multiply by volume here.
-				*/
-				v->dSample = v->AUD_DAT[0] * v->AUD_VOL; // -128..127 * 0.0 .. 1.0
-
-				// progress AUD_DAT buffer
-				v->AUD_DAT[0] = v->AUD_DAT[1];
-				v->sampleCounter--;
+				refetchPeriod(v); // inlined
 			}
 		}
 	}
@@ -609,8 +583,8 @@ static inline void processMixedSamplesAmigaPanning(uint32_t i, int16_t *out)
 	double dR = dMixBufferR[i];
 
 	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
-	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
-	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
 
 	// left channel - 1-bit triangular dithering (high-pass filtered)
 	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
@@ -646,8 +620,8 @@ static inline void processMixedSamples(uint32_t i, int16_t *out)
 	dR = dMid - dSide;
 
 	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
-	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
-	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
 
 	// left channel - 1-bit triangular dithering (high-pass filtered)
 	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
@@ -678,8 +652,8 @@ static inline void processMixedSamplesAmigaPanning_2x(uint32_t i, int16_t *out) 
 	dR = decimate2x_R(dMixBufferR[offset1], dMixBufferR[offset2]);
 
 	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
-	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
-	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
 
 	// left channel - 1-bit triangular dithering (high-pass filtered)
 	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
@@ -718,8 +692,8 @@ static inline void processMixedSamples_2x(uint32_t i, int16_t *out) // 2x oversa
 	dR = dMid - dSide;
 
 	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
-	dL *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
-	dR *= NORM_FACTOR * (-INT16_MAX / (double)AMIGA_VOICES);
+	dL *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
+	dR *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
 
 	// left channel - 1-bit triangular dithering (high-pass filtered)
 	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
@@ -782,7 +756,7 @@ void paulaMixSamples(int16_t *target, uint32_t numSamples)
 	if (audio.oversamplingFlag) // 2x oversampling
 	{
 		// mix and filter channels (at 2x rate)
-		mixChannels(numSamples*2);
+		paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples*2);
 		processFilters(numSamples*2);
 
 		// downsample, normalize and dither
@@ -809,7 +783,7 @@ void paulaMixSamples(int16_t *target, uint32_t numSamples)
 	}
 	else
 	{
-		mixChannels(numSamples);
+		paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples);
 		processFilters(numSamples);
 
 		// normalize and dither
@@ -969,10 +943,8 @@ bool paulaInit(int32_t audioFrequency)
 	if (audio.oversamplingFlag)
 		maxSamplesToMix *= 2;
 
-	const int32_t bufferBytes = maxSamplesToMix * sizeof (double);
-
-	dMixBufferL = (double *)calloc(1, bufferBytes);
-	dMixBufferR = (double *)calloc(1, bufferBytes);
+	dMixBufferL = (double *)malloc(maxSamplesToMix * sizeof (double));
+	dMixBufferR = (double *)malloc(maxSamplesToMix * sizeof (double));
 
 	if (dMixBufferL == NULL || dMixBufferR == NULL)
 	{
@@ -986,7 +958,6 @@ bool paulaInit(int32_t audioFrequency)
 	audio.tickSampleCounter64 = 0; // clear tick sample counter so that it will instantly initiate a tick
 
 	resetAudioDithering();
-	resetCachedMixerPeriod();
 	return true;
 }
 

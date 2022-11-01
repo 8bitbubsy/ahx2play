@@ -19,7 +19,7 @@
 #define PAULA_PAL_CLK AMIGA_PAL_CCK_HZ
 #define CIA_PAL_CLK (AMIGA_PAL_CCK_HZ / 5.0)
 
-#define AMIGA_VOICES 4
+#define PAULA_VOICES 4
 
 typedef struct audio_t
 {
@@ -34,6 +34,7 @@ typedef struct voice_t
 	volatile bool DMA_active;
 
 	// internal values (don't modify directly!)
+	bool DMATriggerFlag, nextSampleStage;
 	int8_t AUD_DAT[2]; // DMA data buffer
 	const int8_t *location; // current location
 	uint16_t lengthCounter; // current length
@@ -51,19 +52,14 @@ typedef struct voice_t
 	// for BLEP synthesis
 	double dLastDelta, dLastPhase, dLastDeltaMul, dBlepOffset, dDeltaMul;
 
-	// period cache
-	int32_t oldPeriod;
-	double dOldVoiceDelta, dOldVoiceDeltaMul;
-} paula_t;
+} paulaVoice_t;
 
 void paulaClearFilterState(void);
-void resetCachedMixerPeriod(void);
 void resetAudioDithering(void);
 
 double amigaCIAPeriod2Hz(uint16_t period);
 bool amigaSetCIAPeriod(uint16_t period); // replayer ticker speed
 
-void paulaMixSamples(int16_t *target, uint32_t numSamples);
 bool paulaInit(int32_t audioFrequency);
 void paulaClose(void);
 
@@ -72,12 +68,12 @@ void paulaSetStereoSeparation(int32_t percentage); // 0..100 (percentage)
 
 void paulaTogglePause(void);
 void paulaOutputSamples(int16_t *stream, int32_t numSamples);
-void paulaStopAllDMAs(void);
-void paulaStartAllDMAs(void);
+void paulaSetDMACON(uint16_t bits);
 void paulaSetPeriod(int32_t ch, uint16_t period);
 void paulaSetVolume(int32_t ch, uint16_t vol);
 void paulaSetLength(int32_t ch, uint16_t len);
 void paulaSetData(int32_t ch, const int8_t *src);
+void paulaMixSamples(int16_t *target, uint32_t numSamples);
 
 extern audio_t audio; // paula.c
-extern paula_t paula[AMIGA_VOICES]; // paula.c
+extern paulaVoice_t paula[PAULA_VOICES]; // paula.c

@@ -523,7 +523,9 @@ bool ahxLoad(const char *filename)
 void ahxFree(void)
 {
 	ahxStop();
-	paulaStopAllDMAs(); // 8bb: song can be free'd now
+	paulaSetDMACON(0); // 8bb: stop all Paula voice DMAs
+
+	// 8bb: song can be free'd now
 
 	if (song.SubSongTable != NULL)
 		free(song.SubSongTable);

@@ -80,10 +80,10 @@ static void SetUpAudioChannels(void) // 8bb: only call this while mixer is locke
 {
 	plyVoiceTemp_t *ch;
 
-	paulaStopAllDMAs();
+	paulaSetDMACON(0); // 8bb: stop all Paula voice DMAs
 
 	ch = song.pvt;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)
 	{
 		ch->audioPointer = waves->currentVoice[i];
 
@@ -93,7 +93,7 @@ static void SetUpAudioChannels(void) // 8bb: only call this while mixer is locke
 		paulaSetLength(i, 0x280 / 2);
 	}
 
-	paulaStartAllDMAs();
+	paulaSetDMACON(0x8000 | 15); // 8bb: start all Paula voice DMAs
 }
 
 static void InitVoiceXTemp(plyVoiceTemp_t *ch) // 8bb: only call this while mixer is locked!
@@ -112,7 +112,7 @@ static void InitVoiceXTemp(plyVoiceTemp_t *ch) // 8bb: only call this while mixe
 
 static void ahxQuietAudios(void)
 {
-	for (int32_t i = 0; i < AMIGA_VOICES; i++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++)
 		paulaSetVolume(i, 0);
 }
 
@@ -490,7 +490,7 @@ static void ProcessStep(plyVoiceTemp_t *ch)
 				{
 					// 8bb: set TrackMasterVolume for all channels
 					plyVoiceTemp_t *c = song.pvt;
-					for (int32_t i = 0; i < AMIGA_VOICES; i++, c++)
+					for (int32_t i = 0; i < PAULA_VOICES; i++, c++)
 						c->TrackMasterVolume = (uint8_t)p;
 				}
 				else
@@ -1087,7 +1087,7 @@ void SIDInterrupt(void)
 
 	// set audioregisters... (8bb: yes, this is done here, NOT last like in WinAHX/AHX.cpp!)
 	ch = song.pvt;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)
 		SetAudio(i, ch);
 
 	if (song.StepWaitFrames == 0)
@@ -1103,7 +1103,7 @@ void SIDInterrupt(void)
 			uint8_t *posTableNext = &song.PosTable[posNext << 3];
 
 			ch = song.pvt;
-			for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
+			for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)
 			{
 				const int32_t offset = i << 1;
 				ch->Track = posTable[offset+0];
@@ -1117,14 +1117,14 @@ void SIDInterrupt(void)
 
 		// - new pos or not, now treat STEPs (means 'em notes 'emself)
 		ch = song.pvt;
-		for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
+		for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)
 			ProcessStep(ch);
 
 		song.StepWaitFrames = song.Tempo;
 	}
 
 	ch = song.pvt;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)
 		ProcessFrame(ch);
 
 	song.StepWaitFrames--;
@@ -1288,7 +1288,7 @@ bool ahxPlay(int32_t subSong)
 
 	ahxQuietAudios();
 
-	for (int32_t i = 0; i < AMIGA_VOICES; i++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++)
 		InitVoiceXTemp(&song.pvt[i]);
 
 	SetUpAudioChannels();
@@ -1300,7 +1300,7 @@ bool ahxPlay(int32_t subSong)
 	memset(waves->EmptyFilterSection, 0, sizeof (waves->EmptyFilterSection));
 
 	plyVoiceTemp_t *ch = song.pvt;
-	for (int32_t i = 0; i < AMIGA_VOICES; i++, ch++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)
 		ch->SquareTempBuffer = waves->SquareTempBuffer[i];
 
 	song.PosJump = false;
@@ -1313,7 +1313,6 @@ bool ahxPlay(int32_t subSong)
 	audio.tickSampleCounter64 = 0; // 8bb: clear tick sample counter so that it will instantly initiate a tick
 
 	paulaClearFilterState();
-	resetCachedMixerPeriod();
 	resetAudioDithering();
 
 	song.dBPM = amigaCIAPeriod2Hz(song.SongCIAPeriod) * 2.5;
@@ -1332,7 +1331,7 @@ void ahxStop(void)
 	song.intPlaying = false;
 	ahxQuietAudios();
 
-	for (int32_t i = 0; i < AMIGA_VOICES; i++)
+	for (int32_t i = 0; i < PAULA_VOICES; i++)
 		InitVoiceXTemp(&song.pvt[i]);
 
 	unlockMixer();
