@@ -673,7 +673,11 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 					ins = &song.EmptyInstrument;
 
 				ch->rFrames = ch->HardCutReleaseF;
-				ch->rDelta = 0 - ((ch->adsr - (ins->rVolume << 8)) / ch->HardCutReleaseF);
+
+				ch->rDelta = 0;
+				if (ch->rFrames > 0)
+					ch->rDelta = 0 - ((ch->adsr - (ins->rVolume << 8)) / ch->rFrames);
+
 				ch->aFrames = 0;
 				ch->dFrames = 0;
 				ch->sFrames = 0;
