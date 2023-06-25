@@ -1023,7 +1023,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 		{
 			uint32_t seed = song.WNRandom;
 
-			audioSource += seed & ((NOIZE_SIZE-0x280) - 1);
+			audioSource += seed & ((WHITENOISE_LENGTH-0x280) - 1);
 
 			seed += 2239384;
 			ROR32(seed, 8); // 8bb: 32-bit right-bit-rotate by 8

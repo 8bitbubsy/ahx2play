@@ -18,8 +18,8 @@ enum
 #define AHX_HIGHEST_CIA_PERIOD 14209 /* ~49.92Hz */
 #define AHX_DEFAULT_CIA_PERIOD AHX_HIGHEST_CIA_PERIOD
 
-#define NOIZE_SIZE (0x280*3)
-#define WAV_FILTER_LENGTH (252 + 252 + (0x80 * 32) + NOIZE_SIZE)
+#define WHITENOISE_LENGTH (0x280*3)
+#define WAV_FILTER_LENGTH (252 + 252 + (0x80 * 32) + WHITENOISE_LENGTH)
 
 #define CLAMP16(i) if ((int16_t)(i) != i) i = 0x7FFF ^ (i >> 31)
 #define CLAMP(x, low, high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
@@ -217,7 +217,7 @@ typedef struct
 	int8_t triangle04[0x04], triangle08[0x08], triangle10[0x10], triangle20[0x20], triangle40[0x40], triangle80[0x80];
 	int8_t sawtooth04[0x04], sawtooth08[0x08], sawtooth10[0x10], sawtooth20[0x20], sawtooth40[0x40], sawtooth80[0x80];
 	int8_t squares[0x80 * 32];
-	int8_t whiteNoiseBig[NOIZE_SIZE];
+	int8_t whiteNoiseBig[WHITENOISE_LENGTH];
 	int8_t highPasses[WAV_FILTER_LENGTH * 31];
 
 	// 8bb: moved these here, so that they get dword-aligned

@@ -48,7 +48,7 @@ static const uint16_t lengthTable[6+6+32+1] =
 	0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,
 	0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,
 
-	NOIZE_SIZE
+	WHITENOISE_LENGTH
 };
 
 static void triangleGenerate(int8_t *dst8, int16_t delta, int32_t offset, int32_t length)
@@ -261,7 +261,7 @@ bool ahxInitWaves(void) // 8bb: this generates bit-accurate AHX 2.3d-sp3 wavefor
 	sawToothGenerate(waves->sawtooth40, 0x40);
 	sawToothGenerate(waves->sawtooth80, 0x80);
 	squareGenerate(waves->squares);
-	whiteNoiseGenerate(waves->whiteNoiseBig, NOIZE_SIZE);
+	whiteNoiseGenerate(waves->whiteNoiseBig, WHITENOISE_LENGTH);
 
 	setUpFilterWaveForms();
 	return true;
