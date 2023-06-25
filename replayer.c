@@ -952,13 +952,15 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	// Square Treatin' (Calculation-Stuff)
 	if (ch->Waveform == 3-1 || ch->PlantSquare)
 	{
-		const int8_t *src8;
+		/* 8bb: Safety bug-fix for out-of-bounds filter positions.
+		** On original AHX, it can and will read outside of allocated AHX memory.
+		**
+		** Since there's no way to get this to sound right, I think it makes sense
+		** to just properly clamp it instead.
+		*/
+		const uint8_t filterPos = CLAMP(ch->filterPos, 1, 63);
 
-		// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
-		if (ch->filterPos == 0 || ch->filterPos > 63)
-			src8 = waves->EmptyFilterSection;
-		else
-			src8 = (const int8_t *)&waves->squares[((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
+		const int8_t *src8 = (const int8_t *)&waves->squares[((int32_t)filterPos - 32) * WAV_FILTER_LENGTH]; // squares@desired.filter
 
 		uint8_t whichSquare = ch->squarePos << (5 - ch->Wavelength);
 		if ((int8_t)whichSquare > 0x20)
@@ -1001,11 +1003,15 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 		// Waveform 3 (doesn't need filter add)..
 		if (ch->Waveform != 3-1)
 		{
-			// 8bb: safety bug-fix... If filter is out of range, use empty buffer (yes, this can easily happen)
-			if (ch->filterPos == 0 || ch->filterPos > 63)
-				audioSource = waves->EmptyFilterSection;
-			else
-				audioSource += ((int32_t)ch->filterPos - 32) * WAV_FILTER_LENGTH;
+			/* 8bb: Safety bug-fix for out-of-bounds filter positions.
+			** On original AHX, it can and will read outside of allocated AHX memory.
+			**
+			** Since there's no way to get this to sound right, I think it makes sense
+			** to just properly clamp it instead.
+			*/
+			const uint8_t filterPos = CLAMP(ch->filterPos, 1, 63);
+
+			audioSource += ((int32_t)filterPos - 32) * WAV_FILTER_LENGTH;
 		}
 
 		// Waveform 1 or 2
@@ -1295,9 +1301,8 @@ bool ahxPlay(int32_t subSong)
 	amigaSetCIAPeriod(song.SongCIAPeriod);
 
 	// 8bb: Added this. Clear custom data (these are put in the waves struct for dword-alignment)
-	memset(waves->SquareTempBuffer,   0, sizeof (waves->SquareTempBuffer));
-	memset(waves->currentVoice,       0, sizeof (waves->currentVoice));
-	memset(waves->EmptyFilterSection, 0, sizeof (waves->EmptyFilterSection));
+	memset(waves->SquareTempBuffer, 0, sizeof (waves->SquareTempBuffer));
+	memset(waves->currentVoice,     0, sizeof (waves->currentVoice));
 
 	plyVoiceTemp_t *ch = song.pvt;
 	for (int32_t i = 0; i < PAULA_VOICES; i++, ch++)

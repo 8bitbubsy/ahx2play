@@ -223,9 +223,6 @@ typedef struct
 	// 8bb: moved these here, so that they get dword-aligned
 	int8_t SquareTempBuffer[PAULA_VOICES][0x80];
 	int8_t currentVoice[PAULA_VOICES][0x280];
-
-	// 8bb: Added this (also put here for dword-alignment). The size is just big enough, don't change it!
-	int8_t EmptyFilterSection[0x80 * 32];
 }
 #ifdef __GNUC__
 __attribute__ ((packed))
