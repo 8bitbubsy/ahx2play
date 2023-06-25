@@ -511,10 +511,10 @@ static void pListCommandParse(plyVoiceTemp_t *ch, uint8_t cmd, uint8_t param)
 		if (param == 0)
 			return; // cmd 0-00 is STILL nuttin'
 
-		if (ch->IgnoreFilter)
+		if (ch->IgnoreFilter > 0)
 		{
-			ch->filterPos = ch->IgnoreFilter;
-			ch->IgnoreFilter = false;
+			ch->filterPos = ch->IgnoreFilter; // 00..3F
+			ch->IgnoreFilter = 0;
 		}
 		else
 		{
