@@ -20,7 +20,7 @@
 #include "replayer.h" // tickReplayer(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
 
 #define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
-#define AUDIO_GAIN 1.5f /* this is a good value between loudness and clipping */
+#define AUDIO_GAIN 1.75f /* this is a good value between loudness and clipping */
 #define STEREO_NORM_FACTOR 0.5f /* cumulative mid/side normalization factor (1/sqrt(2))*(1/sqrt(2)) */
 #define INITIAL_DITHER_SEED 0x12345000
 
