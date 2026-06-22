@@ -475,7 +475,6 @@ void paulaMixSamples(int16_t *target, uint32_t numSamples)
 	
 	paulaGenerateSamples(fMixBufferL, fMixBufferR, numSamples);
 
-	// normalize and dither
 	int16_t out[2];
 	int16_t *outStream = target;
 	if (audio.stereoSeparation == 100)
@@ -518,7 +517,7 @@ void paulaOutputSamples(int16_t *stream, int32_t numSamples)
 	{
 		if (audio.tickSampleCounter <= 0) // new replayer tick
 		{
-			tickReplayer(); // replayer.c
+			tickReplayer();
 			audio.tickSampleCounter = audio.samplesPerTickInt;
 
 			audio.tickSampleCounterFrac += audio.samplesPerTickFrac;
