@@ -21,7 +21,6 @@ enum
 #define WHITENOISE_LENGTH (0x280*3)
 #define WAV_FILTER_LENGTH (252 + 252 + (0x80 * 32) + WHITENOISE_LENGTH)
 
-#define CLAMP16(i) if ((int16_t)(i) != i) i = 0x7FFF ^ (i >> 31)
 #define CLAMP(x, low, high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
 
 // bit-rotate macros
@@ -265,4 +264,4 @@ bool ahxRecordWAV(const char *fileIn, const char *fileOut, int32_t subSong,
 
 int32_t ahxGetErrorCode(void);
 
-void SIDInterrupt(void); // 8bb: replayer ticker
+void tickReplayer(void);

@@ -12,6 +12,10 @@
 // Read "audiodrivers/how_to_write_drivers.txt"
 #endif
 
+#define BPM_FRAC_BITS 52
+#define BPM_FRAC_SCALE (1ULL << BPM_FRAC_BITS)
+#define BPM_FRAC_MASK (BPM_FRAC_SCALE-1)
+
 // main crystal oscillator for PAL Amiga systems
 #define AMIGA_PAL_XTAL_HZ 28375160
 
@@ -25,7 +29,9 @@ typedef struct audio_t
 {
 	volatile bool playing, pause;
 	int32_t outputFreq, masterVol, stereoSeparation;
-	int64_t tickSampleCounter64, samplesPerTick64;
+	int32_t tickSampleCounter;
+	uint32_t samplesPerTickInt;
+	uint64_t tickSampleCounterFrac, samplesPerTickFrac;
 } audio_t;
 
 typedef struct voice_t

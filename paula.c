@@ -16,8 +16,8 @@
 #include <stdbool.h>
 #include <string.h>
 #include "paula.h" // PAULA_VOICES
-#include <math.h> // ceil()
-#include "replayer.h" // SIDInterrupt(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
+#include <math.h>
+#include "replayer.h" // tickReplayer(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
 
 #define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
 #define NORM_FACTOR 1.5 /* this is a good value between loudness and clipping */
@@ -492,16 +492,14 @@ static inline void processMixedSamplesAmigaPanning(uint32_t i, int16_t *out)
 	dL = (dL + dPrng) - dPrngStateL;
 	dPrngStateL = dPrng;
 	smp32 = (int32_t)dL;
-	CLAMP16(smp32);
-	out[0] = (int16_t)smp32;
+	out[0] = (int16_t)CLAMP(smp32, INT16_MIN, INT16_MAX);
 
 	// right channel - 1-bit triangular dithering (high-pass filtered)
 	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
 	dR = (dR + dPrng) - dPrngStateR;
 	dPrngStateR = dPrng;
 	smp32 = (int32_t)dR;
-	CLAMP16(smp32);
-	out[1] = (int16_t)smp32;
+	out[1] = (int16_t)CLAMP(smp32, INT16_MIN, INT16_MAX);
 }
 
 static inline void processMixedSamples(uint32_t i, int16_t *out)
@@ -529,16 +527,14 @@ static inline void processMixedSamples(uint32_t i, int16_t *out)
 	dL = (dL + dPrng) - dPrngStateL;
 	dPrngStateL = dPrng;
 	smp32 = (int32_t)dL;
-	CLAMP16(smp32);
-	out[0] = (int16_t)smp32;
+	out[0] = (int16_t)CLAMP(smp32, INT16_MIN, INT16_MAX);
 
 	// right channel - 1-bit triangular dithering (high-pass filtered)
 	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
 	dR = (dR + dPrng) - dPrngStateR;
 	dPrngStateR = dPrng;
 	smp32 = (int32_t)dR;
-	CLAMP16(smp32);
-	out[1] = (int16_t)smp32;
+	out[1] = (int16_t)CLAMP(smp32, INT16_MIN, INT16_MAX);
 }
 
 void paulaMixSamples(int16_t *target, uint32_t numSamples)
@@ -588,23 +584,28 @@ void paulaOutputSamples(int16_t *stream, int32_t numSamples)
 	int32_t samplesLeft = numSamples;
 	while (samplesLeft > 0)
 	{
-		if (audio.tickSampleCounter64 <= 0) // new replayer tick
+		if (audio.tickSampleCounter <= 0) // new replayer tick
 		{
-			SIDInterrupt(); // replayer.c
-			audio.tickSampleCounter64 += audio.samplesPerTick64;
+			tickReplayer(); // replayer.c
+			audio.tickSampleCounter = audio.samplesPerTickInt;
+
+			audio.tickSampleCounterFrac += audio.samplesPerTickFrac;
+			if (audio.tickSampleCounterFrac >= BPM_FRAC_SCALE)
+			{
+				audio.tickSampleCounterFrac &= BPM_FRAC_MASK;
+				audio.tickSampleCounter++;
+			}
 		}
 
-		const int32_t remainingTick = (audio.tickSampleCounter64 + UINT32_MAX) >> 32; // ceil rounding (upwards)
-
 		int32_t samplesToMix = samplesLeft;
-		if (samplesToMix > remainingTick)
-			samplesToMix = remainingTick;
+		if (audio.tickSampleCounter > 0 && samplesToMix > audio.tickSampleCounter)
+			samplesToMix = audio.tickSampleCounter;
 
 		paulaMixSamples(streamOut, samplesToMix);
-		streamOut += samplesToMix * 2;
+		streamOut += samplesToMix * 2; // *2 for stereo
 
 		samplesLeft -= samplesToMix;
-		audio.tickSampleCounter64 -= (int64_t)samplesToMix << 32;
+		audio.tickSampleCounter -= samplesToMix;
 	}
 }
 
@@ -622,14 +623,18 @@ double amigaCIAPeriod2Hz(uint16_t period)
 	return (double)CIA_PAL_CLK / (period+1); // +1, CIA triggers on underflow
 }
 
-bool amigaSetCIAPeriod(uint16_t period) // replayer ticker
+bool amigaSetCIAPeriod(uint16_t period)
 {
 	const double dCIAHz = amigaCIAPeriod2Hz(period);
 	if (dCIAHz == 0.0)
 		return false;
 
 	const double dSamplesPerTick = audio.outputFreq / dCIAHz;
-	audio.samplesPerTick64 = (int64_t)(dSamplesPerTick * (UINT32_MAX+1.0)); // 32.32fp
+
+	double dSamplesPerTickInt, dSamplesPerTickFrac = modf(dSamplesPerTick, &dSamplesPerTickInt);
+
+	audio.samplesPerTickInt = (uint32_t)dSamplesPerTickInt;
+	audio.samplesPerTickFrac = (uint64_t)(dSamplesPerTickFrac * BPM_FRAC_SCALE);
 
 	return true;
 }
@@ -657,7 +662,9 @@ bool paulaInit(int32_t audioFrequency)
 	}
 
 	amigaSetCIAPeriod(AHX_DEFAULT_CIA_PERIOD);
-	audio.tickSampleCounter64 = 0; // clear tick sample counter so that it will instantly initiate a tick
+
+	audio.tickSampleCounter = 0; // zero tick sample counter so that it will instantly initiate a tick
+	audio.samplesPerTickFrac = 0;
 
 	resetAudioDithering();
 	return true;

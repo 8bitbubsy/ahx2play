@@ -1084,7 +1084,7 @@ static void ProcessFrame(plyVoiceTemp_t *ch)
 	ch->audioVolume = (finalVol * ch->TrackMasterVolume) >> 6;
 }
 
-void SIDInterrupt(void)
+void tickReplayer(void)
 {
 	plyVoiceTemp_t *ch;
 
@@ -1197,7 +1197,9 @@ void ahxNextPattern(void)
 	{
 		song.PosJump = song.PosNr + 1;
 		song.PatternBreak = true;
-		audio.tickSampleCounter64 = 0; // 8bb: clear tick sample counter so that it will instantly initiate a tick
+
+		audio.tickSampleCounter = 0; // 8bb: zero tick sample counter so that it will instantly initiate a tick
+		audio.tickSampleCounterFrac = 0;
 	}
 
 	unlockMixer();
@@ -1211,7 +1213,9 @@ void ahxPrevPattern(void)
 	{
 		song.PosJump = song.PosNr - 1;
 		song.PatternBreak = true;
-		audio.tickSampleCounter64 = 0; // 8bb: clear tick sample counter so that it will instantly initiate a tick
+
+		audio.tickSampleCounter = 0; // 8bb: zero tick sample counter so that it will instantly initiate a tick
+		audio.tickSampleCounterFrac = 0;
 	}
 
 	unlockMixer();
@@ -1315,7 +1319,8 @@ bool ahxPlay(int32_t subSong)
 	song.loopCounter = 0;
 	song.loopTimes = 0; // 8bb: updated later in WAV writing mode
 
-	audio.tickSampleCounter64 = 0; // 8bb: clear tick sample counter so that it will instantly initiate a tick
+	audio.tickSampleCounter = 0; // 8bb: zero tick sample counter so that it will instantly initiate a tick
+	audio.tickSampleCounterFrac = 0;
 
 	resetAudioDithering();
 
@@ -1388,18 +1393,26 @@ static void finishWAVHeader(FILE *f, uint32_t numDataBytes)
 
 static int32_t ahxGetFrame(int16_t *streamOut) // 8bb: returns bytes mixed
 {
-	if (audio.tickSampleCounter64 <= 0) // 8bb: new replayer tick
+	if (audio.tickSampleCounter <= 0) // 8bb: new replayer tick
 	{
-		SIDInterrupt();
-		audio.tickSampleCounter64 += audio.samplesPerTick64;
+		tickReplayer();
+
+		audio.tickSampleCounter = audio.samplesPerTickInt;
+
+		audio.tickSampleCounterFrac += audio.samplesPerTickFrac;
+		if (audio.tickSampleCounterFrac >= BPM_FRAC_SCALE)
+		{
+			audio.tickSampleCounterFrac &= BPM_FRAC_MASK;
+			audio.tickSampleCounter++;
+		}
 	}
 
-	const int32_t samplesToMix = (audio.tickSampleCounter64 + UINT32_MAX) >> 32; // 8bb: ceil (rounded upwards)
+	const int32_t samplesToMix = audio.tickSampleCounter;
 
 	paulaMixSamples(streamOut, samplesToMix);
 	streamOut += samplesToMix * 2;
 
-	audio.tickSampleCounter64 -= (int64_t)samplesToMix << 32;
+	audio.tickSampleCounter -= samplesToMix;
 
 	return samplesToMix * 2 * sizeof (short);
 }
