@@ -54,7 +54,6 @@ typedef struct voice_t
 
 } paulaVoice_t;
 
-void paulaClearFilterState(void);
 void resetAudioDithering(void);
 
 double amigaCIAPeriod2Hz(uint16_t period);

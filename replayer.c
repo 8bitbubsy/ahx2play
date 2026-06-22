@@ -1317,7 +1317,6 @@ bool ahxPlay(int32_t subSong)
 
 	audio.tickSampleCounter64 = 0; // 8bb: clear tick sample counter so that it will instantly initiate a tick
 
-	paulaClearFilterState();
 	resetAudioDithering();
 
 	song.dBPM = amigaCIAPeriod2Hz(song.SongCIAPeriod) * 2.5;

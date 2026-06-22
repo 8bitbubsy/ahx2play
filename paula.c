@@ -1,6 +1,5 @@
 /*
-** - Amiga 1200 Paula emulator w/ filters -
-** Doesn't include the optional "LED" filter. This was never used in AHX anyway.
+** - Simple Amiga 1200 Paula emulator w/ BLEP synthesis -
 **
 ** This code has been crafted for use with ahx2play.
 ** Usage outside of ahx2play may be unstable or give unwanted results.
@@ -25,7 +24,6 @@
 #define STEREO_NORM_FACTOR 0.5 /* cumulative mid/side normalization factor (1/sqrt(2))*(1/sqrt(2)) */
 #define INITIAL_DITHER_SEED 0x12345000
 
-static bool useA1200LowPassFilter;
 static int8_t emptySample[MAX_SAMPLE_LENGTH*2];
 static int32_t randSeed = INITIAL_DITHER_SEED;
 static double *dMixBufferL, *dMixBufferR, dPrngStateL, dPrngStateR, dSideFactor, dPeriodToDeltaDiv, dMixNormalize;
@@ -33,103 +31,6 @@ static double *dMixBufferL, *dMixBufferR, dPrngStateL, dPrngStateR, dSideFactor,
 // globalized
 audio_t audio;
 paulaVoice_t paula[PAULA_VOICES];
-
-/*
-** Math replacement
-*/
-#define MY_PI 3.14159265358979323846264338327950288
-#define MY_TWO_PI 6.28318530717958647692528676655900576
-
-static double my_sqrt(double x)
-{
-	double number = x;
-	double s = number / 2.5;
-
-	double old = 0.0;
-	while (s != old)
-	{
-		old = s;
-		s = (number / old + old) / 2.0;
-	}
- 
-	return s;
-}
-
-static double cosTaylorSeries(double x)
-{
-#define ITERATIONS 32 /* good enough... */
-
-	x = fmod(x, MY_TWO_PI);
-	if (x < 0.0)
-		x = -x;
-
-	double tmp = 1.0;
-	double sum = 1.0;
-
-	for (double i = 2.0; i <= ITERATIONS*2.0; i += 2.0)
-	{
-		tmp *= -(x*x) / (i * (i-1.0));
-		sum += tmp;
-	}
-
-	return sum;
-}
-
-static double my_cos(double x)
-{
-	return cosTaylorSeries(x);
-}
-
-// -----------------------------------------------
-// -----------------------------------------------
-
-/* 1-pole 6dB/oct high-pass RC filter, from:
-** https://www.musicdsp.org/en/latest/Filters/116-one-pole-lp-and-hp.html
-*/
-
-typedef struct rcFilter_t
-{
-	double tmp[2], c1, c2;
-} rcFilter_t;
-
-static rcFilter_t filterLoA1200, filterHiA1200;
-
-static void calcRCFilterCoeffs(double sr, double hz, rcFilter_t *f)
-{
-	const double a = (hz < sr / 2.0) ? my_cos((MY_TWO_PI * hz) / sr) : 1.0;
-	const double b = 2.0 - a;
-	const double c = b - my_sqrt((b*b)-1.0);
-
-	f->c1 = 1.0 - c;
-	f->c2 = c;
-}
-
-static void clearRCFilterState(rcFilter_t *f)
-{
-	f->tmp[0] = f->tmp[1] = 0.0;
-}
-
-static void RCLowPassFilterStereo(rcFilter_t *f, const double *in, double *out)
-{
-	// left channel
-	f->tmp[0] = (f->c1 * in[0]) + (f->c2 * f->tmp[0]);
-	out[0] = f->tmp[0];
-
-	// right channel
-	f->tmp[1] = (f->c1 * in[1]) + (f->c2 * f->tmp[1]);
-	out[1] = f->tmp[1];
-}
-
-static void RCHighPassFilterStereo(rcFilter_t *f, const double *in, double *out)
-{
-	// left channel
-	f->tmp[0] = (f->c1 * in[0]) + (f->c2 * f->tmp[0]);
-	out[0] = in[0] - f->tmp[0];
-
-	// right channel
-	f->tmp[1] = (f->c1 * in[1]) + (f->c2 * f->tmp[1]);
-	out[1] = in[1] - f->tmp[1];
-}
 
 // -----------------------------------------------
 // -----------------------------------------------
@@ -712,52 +613,14 @@ static inline void processMixedSamples_2x(uint32_t i, int16_t *out) // 2x oversa
 	out[1] = (int16_t)smp32;
 }
 
-static void processFilters(uint32_t numSamples)
-{
-	double dOut[2];
-
-	if (useA1200LowPassFilter)
-	{
-		for (uint32_t i = 0; i < numSamples; i++)
-		{
-			dOut[0] = dMixBufferL[i];
-			dOut[1] = dMixBufferR[i];
-
-			// low-pass RC filter
-			RCLowPassFilterStereo(&filterLoA1200, dOut, dOut);
-
-			// high-pass RC filter
-			RCHighPassFilterStereo(&filterHiA1200, dOut, dOut);
-
-			dMixBufferL[i] = dOut[0];
-			dMixBufferR[i] = dOut[1];
-		}
-	}
-	else
-	{
-		for (uint32_t i = 0; i < numSamples; i++)
-		{
-			dOut[0] = dMixBufferL[i];
-			dOut[1] = dMixBufferR[i];
-
-			// high-pass RC filter
-			RCHighPassFilterStereo(&filterHiA1200, dOut, dOut);
-
-			dMixBufferL[i] = dOut[0];
-			dMixBufferR[i] = dOut[1];
-		}
-	}
-}
-
 void paulaMixSamples(int16_t *target, uint32_t numSamples)
 {
-	// apply filter, normalize, adjust stereo separation (if needed), dither and quantize
+	// normalize, adjust stereo separation (if needed), dither and quantize
 	
 	if (audio.oversamplingFlag) // 2x oversampling
 	{
-		// mix and filter channels (at 2x rate)
+		// mix channels (at 2x rate)
 		paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples*2);
-		processFilters(numSamples*2);
 
 		// downsample, normalize and dither
 		int16_t out[2];
@@ -784,7 +647,6 @@ void paulaMixSamples(int16_t *target, uint32_t numSamples)
 	else
 	{
 		paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples);
-		processFilters(numSamples);
 
 		// normalize and dither
 		int16_t out[2];
@@ -848,55 +710,6 @@ void paulaOutputSamples(int16_t *stream, int32_t numSamples)
 	}
 }
 
-void paulaClearFilterState(void)
-{
-	clearRCFilterState(&filterLoA1200);
-	clearRCFilterState(&filterHiA1200);
-}
-
-static void calculateFilterCoeffs(void)
-{
-	/* Amiga 1200 filter emulation
-	**
-	** NOTE: Doesn't include the Sallen-Key "LED" filter because AHX never uses it.
-	**
-	** Keep in mind that many of the Amiga schematics that are floating around on
-	** the internet have wrong RC values! They were most likely very early schematics
-	** that didn't change before production (or changes that never reached production).
-	** This has been confirmed by measuring the components on several Amiga motherboards.
-	**
-	** Correct values for A1200, all revs (A1200_R2.pdf):
-	** - 1-pole RC 6dB/oct low-pass: R=680 ohm, C=6800pF
-	** - Sallen-key low-pass ("LED"): R1/R2=10k ohm, C1=6800pF, C2=3900pF (same as A500)
-	** - 1-pole RC 6dB/oct high-pass: R=1390 ohm (1000+390), C=22uF
-	*/
-	double dAudioFreq = audio.outputFreq;
-	double R, C, fc;
-
-	if (audio.oversamplingFlag)
-		dAudioFreq *= 2.0; // 2x oversampling
-
-	// A1200 1-pole (6db/oct) static RC low-pass filter:
-	R = 680.0;  // R321 (680 ohm)
-	C = 6.8e-9; // C321 (6800pF)
-	fc = 1.0 / (MY_TWO_PI * R * C); // cutoff = ~34419.32Hz
-
-	useA1200LowPassFilter = false;
-	if (dAudioFreq/2.0 > fc)
-	{
-		calcRCFilterCoeffs(dAudioFreq, fc, &filterLoA1200);
-		useA1200LowPassFilter = true;
-	}
-
-	// A1200 1-pole (6dB/oct) static RC high-pass filter:
-	R = 1390.0; // R324 (1K ohm resistor) + R325 (390 ohm resistor)
-	C = 2.2e-5; // C334 (22uF capacitor)
-	fc = 1.0 / (MY_TWO_PI * R * C); // cutoff = ~5.20Hz
-	calcRCFilterCoeffs(dAudioFreq, fc, &filterHiA1200);
-
-	paulaClearFilterState();
-}
-
 void paulaSetStereoSeparation(int32_t percentage) // 0..100 (percentage)
 {
 	audio.stereoSeparation = CLAMP(percentage, 0, 100);
@@ -951,8 +764,6 @@ bool paulaInit(int32_t audioFrequency)
 		paulaClose();
 		return false;
 	}
-
-	calculateFilterCoeffs();
 
 	amigaSetCIAPeriod(AHX_DEFAULT_CIA_PERIOD);
 	audio.tickSampleCounter64 = 0; // clear tick sample counter so that it will instantly initiate a tick
