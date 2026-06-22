@@ -36,27 +36,22 @@ typedef struct audio_t
 
 typedef struct voice_t
 {
-	volatile bool DMA_active;
+	volatile bool active;
 
-	// internal values (don't modify directly!)
-	bool DMATriggerFlag, nextSampleStage;
+	// internal registers
+	bool sampleJustStarted, nextSampleStage;
 	int8_t AUD_DAT[2]; // DMA data buffer
 	const int8_t *location; // current location
 	uint16_t lengthCounter; // current length
 	int32_t sampleCounter; // how many bytes left in AUD_DAT
-	double dSample; // current sample point
+	float fSample; // currently held sample point (multiplied by volume)
+	float fDelta, fPhase;
+	float fBlepDelta, fBlepPhase;
 
 	// registers modified by Paula functions
-	const int8_t *AUD_LC; // location
-	uint16_t AUD_LEN; // length (in words)
-	double AUD_PER_delta, AUD_PER_deltamul; // delta
-	double AUD_VOL; // volume
-
-	double dDelta, dPhase;
-
-	// for BLEP synthesis
-	double dLastDelta, dLastPhase, dLastDeltaMul, dBlepOffset, dDeltaMul;
-
+	const int8_t *storedLocation; // data pointer
+	uint16_t storedLength;
+	float fStoredVol, fStoredDelta;
 } paulaVoice_t;
 
 void resetAudioDithering(void);
