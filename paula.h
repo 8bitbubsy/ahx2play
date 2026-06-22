@@ -24,7 +24,6 @@
 typedef struct audio_t
 {
 	volatile bool playing, pause;
-	bool oversamplingFlag;
 	int32_t outputFreq, masterVol, stereoSeparation;
 	int64_t tickSampleCounter64, samplesPerTick64;
 } audio_t;

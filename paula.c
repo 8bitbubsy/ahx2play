@@ -541,133 +541,31 @@ static inline void processMixedSamples(uint32_t i, int16_t *out)
 	out[1] = (int16_t)smp32;
 }
 
-static inline void processMixedSamplesAmigaPanning_2x(uint32_t i, int16_t *out) // 2x oversampling
-{
-	int32_t smp32;
-	double dPrng, dL, dR;
-
-	// 2x downsampling (decimation)
-	const uint32_t offset1 = (i << 1) + 0;
-	const uint32_t offset2 = (i << 1) + 1;
-	dL = decimate2x_L(dMixBufferL[offset1], dMixBufferL[offset2]);
-	dR = decimate2x_R(dMixBufferR[offset1], dMixBufferR[offset2]);
-
-	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
-	dL *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
-	dR *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
-
-	// left channel - 1-bit triangular dithering (high-pass filtered)
-	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
-	dL = (dL + dPrng) - dPrngStateL;
-	dPrngStateL = dPrng;
-	smp32 = (int32_t)dL;
-	CLAMP16(smp32);
-	out[0] = (int16_t)smp32;
-
-	// right channel - 1-bit triangular dithering (high-pass filtered)
-	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
-	dR = (dR + dPrng) - dPrngStateR;
-	dPrngStateR = dPrng;
-	smp32 = (int32_t)dR;
-	CLAMP16(smp32);
-	out[1] = (int16_t)smp32;
-}
-
-static inline void processMixedSamples_2x(uint32_t i, int16_t *out) // 2x oversampling
-{
-	int32_t smp32;
-	double dPrng, dL, dR;
-
-	// 2x downsampling (decimation)
-	const uint32_t offset1 = (i << 1) + 0;
-	const uint32_t offset2 = (i << 1) + 1;
-	dL = decimate2x_L(dMixBufferL[offset1], dMixBufferL[offset2]);
-	dR = decimate2x_R(dMixBufferR[offset1], dMixBufferR[offset2]);
-
-	// apply stereo separation
-	const double dOldL = dL;
-	const double dOldR = dR;
-	double dMid = (dOldL + dOldR) * STEREO_NORM_FACTOR;
-	double dSide = (dOldL - dOldR) * dSideFactor;
-	dL = dMid + dSide;
-	dR = dMid - dSide;
-
-	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
-	dL *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
-	dR *= NORM_FACTOR * (-INT16_MAX / (double)PAULA_VOICES);
-
-	// left channel - 1-bit triangular dithering (high-pass filtered)
-	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
-	dL = (dL + dPrng) - dPrngStateL;
-	dPrngStateL = dPrng;
-	smp32 = (int32_t)dL;
-	CLAMP16(smp32);
-	out[0] = (int16_t)smp32;
-
-	// right channel - 1-bit triangular dithering (high-pass filtered)
-	dPrng = random32() * (0.5 / INT32_MAX); // -0.5..0.5
-	dR = (dR + dPrng) - dPrngStateR;
-	dPrngStateR = dPrng;
-	smp32 = (int32_t)dR;
-	CLAMP16(smp32);
-	out[1] = (int16_t)smp32;
-}
-
 void paulaMixSamples(int16_t *target, uint32_t numSamples)
 {
 	// normalize, adjust stereo separation (if needed), dither and quantize
 	
-	if (audio.oversamplingFlag) // 2x oversampling
-	{
-		// mix channels (at 2x rate)
-		paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples*2);
+	paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples);
 
-		// downsample, normalize and dither
-		int16_t out[2];
-		int16_t *outStream = target;
-		if (audio.stereoSeparation == 100)
+	// normalize and dither
+	int16_t out[2];
+	int16_t *outStream = target;
+	if (audio.stereoSeparation == 100)
+	{
+		for (uint32_t i = 0; i < numSamples; i++)
 		{
-			for (uint32_t i = 0; i < numSamples; i++)
-			{
-				processMixedSamplesAmigaPanning_2x(i, out);
-				*outStream++ = out[0];
-				*outStream++ = out[1];
-			}
-		}
-		else
-		{
-			for (uint32_t i = 0; i < numSamples; i++)
-			{
-				processMixedSamples_2x(i, out);
-				*outStream++ = out[0];
-				*outStream++ = out[1];
-			}
+			processMixedSamplesAmigaPanning(i, out);
+			*outStream++ = out[0];
+			*outStream++ = out[1];
 		}
 	}
 	else
 	{
-		paulaGenerateSamples(dMixBufferL, dMixBufferR, numSamples);
-
-		// normalize and dither
-		int16_t out[2];
-		int16_t *outStream = target;
-		if (audio.stereoSeparation == 100)
+		for (uint32_t i = 0; i < numSamples; i++)
 		{
-			for (uint32_t i = 0; i < numSamples; i++)
-			{
-				processMixedSamplesAmigaPanning(i, out);
-				*outStream++ = out[0];
-				*outStream++ = out[1];
-			}
-		}
-		else
-		{
-			for (uint32_t i = 0; i < numSamples; i++)
-			{
-				processMixedSamples(i, out);
-				*outStream++ = out[0];
-				*outStream++ = out[1];
-			}
+			processMixedSamples(i, out);
+			*outStream++ = out[0];
+			*outStream++ = out[1];
 		}
 	}
 }
@@ -745,16 +643,9 @@ bool paulaInit(int32_t audioFrequency)
 	paulaSetStereoSeparation(20);
 	paulaSetMasterVolume(256);
 
-	// we do 2x oversampling if the audio output rate is below 96kHz
-	audio.oversamplingFlag = (audio.outputFreq < 96000);
-
 	dPeriodToDeltaDiv = (double)PAULA_PAL_CLK / audio.outputFreq;
-	if (audio.oversamplingFlag)
-		dPeriodToDeltaDiv *= 0.5;
 
 	int32_t maxSamplesToMix = (int32_t)ceil(audio.outputFreq / amigaCIAPeriod2Hz(AHX_HIGHEST_CIA_PERIOD));
-	if (audio.oversamplingFlag)
-		maxSamplesToMix *= 2;
 
 	dMixBufferL = (double *)malloc(maxSamplesToMix * sizeof (double));
 	dMixBufferR = (double *)malloc(maxSamplesToMix * sizeof (double));
