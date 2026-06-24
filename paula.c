@@ -17,7 +17,7 @@
 #include <string.h>
 #include "paula.h" // PAULA_VOICES
 #include <math.h>
-#include "replayer.h" // tickReplayer(), AHX_LOWEST_CIA_PERIOD, AHX_DEFAULT_CIA_PERIOD
+#include "replayer.h" // tickReplayer(), AHX_DEFAULT_CIA_PERIOD
 
 #define MAX_SAMPLE_LENGTH (0x280/2) /* in words. AHX buffer size */
 #define AUDIO_GAIN 1.75f /* this is a good value between loudness and clipping */
@@ -179,7 +179,7 @@ void paulaSetMasterVolume(int32_t vol) // 0..256
 {
 	audio.masterVol = CLAMP(vol, 0, 256);
 
-	// normalization
+	// normalization multiplier
 	fMixNormalize = (float)(AUDIO_GAIN * ((INT16_MAX+1.0) / PAULA_VOICES)) * (audio.masterVol / 256.0f);
 }
 
@@ -217,11 +217,8 @@ void paulaSetVolume(int32_t ch, uint16_t vol)
 
 void paulaSetLength(int32_t ch, uint16_t len)
 {
-	if (len == 0) // not what happens on a real Amiga, but this is fine for AHX
-		len = 1;
-
 	// since AHX has a fixed Paula buffer size, clamp it here
-	if (len > MAX_SAMPLE_LENGTH)
+	if (len == 0 || len > MAX_SAMPLE_LENGTH)
 		len = MAX_SAMPLE_LENGTH;
 		
 	paula[ch].storedLength = len;
@@ -416,6 +413,7 @@ static inline void processMixedSamplesAmigaPanning(uint32_t i, int16_t *out)
 	float fL = fMixBufferL[i];
 	float fR = fMixBufferR[i];
 
+	// normalize
 	fL *= fMixNormalize;
 	fR *= fMixNormalize;
 
@@ -450,7 +448,7 @@ static inline void processMixedSamples(uint32_t i, int16_t *out)
 	fL = fMid + fSide;
 	fR = fMid - fSide;
 
-	// normalize w/ phase-inversion (A500/A1200 has a phase-inverted audio signal)
+	// normalize
 	fL *= fMixNormalize;
 	fR *= fMixNormalize;
 
