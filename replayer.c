@@ -1472,7 +1472,7 @@ bool ahxRecordWAVFromRAM(const uint8_t *data, const char *fileOut, int32_t subSo
 	writeWAVHeader(f, audioFreq);
 
 	isRecordingToWAV = true;
-	if (!ahxPlay(subSong)) // 8bb: modifies error code (also resets audio.tickSampleCounter64)
+	if (!ahxPlay(subSong)) // 8bb: modifies error code (also resets audio.tickSampleCounter/audio.tickSampleCounterFrac)
 	{
 		isRecordingToWAV = false;
 		fclose(f);
@@ -1560,7 +1560,7 @@ bool ahxRecordWAV(const char *fileIn, const char *fileOut, int32_t subSong,
 	writeWAVHeader(f, audioFreq);
 
 	isRecordingToWAV = true;
-	if (!ahxPlay(subSong)) // 8bb: modifies error code (also resets audio.tickSampleCounter64)
+	if (!ahxPlay(subSong)) // 8bb: modifies error code (also resets audio.tickSampleCounter/audio.tickSampleCounterFrac)
 	{
 		isRecordingToWAV = false;
 		fclose(f);
